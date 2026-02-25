@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Transcreva — Áudio em Texto para Reuniões e Aulas</title>
+        <link rel="icon" type="image/png" href="Image/Logo.png" />
+
+        <!-- Estilos básicos (você pode usar tailwind via CDN ou criar seu próprio) -->
+        <script src="https://cdn.tailwindcss.com"></script>
+
+        <meta name="description" content="Transcrição automática de áudio em tempo real para reuniões, aulas e palestras em português brasileiro." />
+    </head>
+    <body class="bg-gray-50 min-h-screen relative">
+
+        <!-- Fundo decorativo opcional -->
+        <div class="home-bg fixed inset-0 bg-gradient-to-br from-blue-50 to-purple-50 -z-10" aria-hidden="true"></div>
+
+        <header class="site-header bg-white shadow-sm">
+            <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+            
+            <a href="index.html"
+                <h1 class="text-2xl font-bold text-indigo-700">Transcreva</h1>
+            
+            </a>
+        
+            <a href="Sobre_Nos/index.html"
+                class="bg-indigo-600 text-white px-8 py-4 rounded-lg hover:bg-indigo-700 transition">
+                Conheça a Equipe
+            </a>
+
+            <p class="text-sm text-gray-600">TCC — Áudio -> Texto- Transcreva o que você desejar
+
+            </p>
+            </div>
+        </header>
+
+        <main class="max-w-5xl mx-auto px-4 py-10">
+            <section class="text-center mb-10">
+            <h2 class="text-4xl font-extrabold text-gray-800 mb-4">Transcreva reuniões, aulas e palestras em tempo real</h2>
+            <p class="text-xl text-gray-600 mb-8">Clique no microfone e comece a falar — o texto aparece automaticamente.</p>
+
+            <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                <button id="startBtn" class="px-8 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-lg transition shadow-lg">
+                Iniciar Transcrição 🎤
+                </button>
+                <button id="stopBtn" class="px-8 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-lg transition shadow-lg hidden">
+                Parar Transcrição ■
+                </button>
+            </div>
+            </section>
+
+            <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-semibold">Transcrição em tempo real</h3>
+                <span id="status" class="text-sm text-gray-500">Aguardando...</span>
+            </div>
+            <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
+                O texto transcrito aparecerá aqui...
+            </div>
+            </section>
+        </main>
+
+    
+
+    </body>
+</html>
