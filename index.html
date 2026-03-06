@@ -1,144 +1,234 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Transcreva — Áudio em Texto para Reuniões e Aulas</title>
-    <link rel="icon" type="image/png" href="Image/Logo.png" />
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <meta name="description" content="Transcrição automática de áudio em tempo real para reuniões, aulas e palestras em português brasileiro." />
+<title>Transcreva — Áudio em Texto para ambientes acadêmicos</title>
+
+<link rel="icon" type="image/png" href="Image/image.png" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<meta name="description" content="Transcrição automática de áudio em tempo real para reuniões, aulas e palestras em português brasileiro." />
+
 </head>
 
-<body class="bg-gray-50 min-h-screen relative">
+<body class="bg-gray-50 min-h-screen relative font-[Inter]">
 
-    <!-- Fundo decorativo -->
-    <div class="fixed inset-0 bg-gradient-to-br from-blue-50 to-purple-50 -z-10" aria-hidden="true"></div>
+<!-- GRID TECNOLÓGICO -->
 
-    <header class="bg-white shadow-sm">
-        <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+<div class="fixed inset-0 -z-20 opacity-20
+bg-[linear-gradient(to_right,#e5e7eb_1px,transparent_1px),
+linear-gradient(to_bottom,#e5e7eb_1px,transparent_1px)]
+bg-[size:40px_40px]"></div>
 
-            <a href="index.html">
-                <h1 class="text-2xl font-bold text-indigo-700">Transcreva</h1>
-            </a>
+<!-- LUZES DIFUSAS -->
 
-            <a href="Sobre_Nos/index.html"
-               class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
-                Conheça a Equipe
-            </a>
+<div class="fixed inset-0 -z-10 overflow-hidden">
 
-        </div>
-    </header>
+<div class="absolute -top-40 -left-40 w-96 h-96 bg-purple-400 rounded-full blur-3xl opacity-30"></div>
 
-    <main class="max-w-5xl mx-auto px-4 py-10">
+<div class="absolute top-40 -right-40 w-96 h-96 bg-blue-400 rounded-full blur-3xl opacity-30"></div>
 
-        <!-- Seção principal -->
-        <section class="text-center mb-10">
-            <h2 class="text-4xl font-extrabold text-gray-800 mb-4">
-                Transcreva reuniões, aulas e palestras em tempo real
-            </h2>
-
-            <p class="text-xl text-gray-600 mb-8">
-                Clique no microfone ou envie um arquivo para começar.
-            </p>
-
-            <div class="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
-
-    <!-- BOTÃO PRINCIPAL -->
-    <button id="startBtn"
-        class="group relative px-8 py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95 
-        text-white font-semibold rounded-xl text-lg transition-all duration-200 
-        shadow-md hover:shadow-xl flex items-center gap-2">
-        
-        <svg xmlns="http://www.w3.org/2000/svg" 
-             class="w-5 h-5 transition-transform group-hover:scale-110" 
-             fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M12 1v14m0 0a4 4 0 004-4V7a4 4 0 10-8 0v4a4 4 0 004 4zM5 11v2a7 7 0 0014 0v-2" />
-        </svg>
-        Iniciar Transcrição
-    </button>
-
-    <!-- YOUTUBE -->
-    <button onclick="abrirYoutube()"
-        class="group px-8 py-4 bg-red-600 hover:bg-red-700 active:scale-95 
-        text-white font-semibold rounded-xl text-lg transition-all duration-200 
-        shadow-md hover:shadow-xl flex items-center gap-2">
-
-        <svg xmlns="http://www.w3.org/2000/svg" 
-             class="w-5 h-5 transition-transform group-hover:scale-110" 
-             fill="currentColor" viewBox="0 0 24 24">
-            <path d="M23.5 6.2a3 3 0 00-2.1-2.1C19.6 3.5 12 3.5 12 3.5s-7.6 0-9.4.6A3 3 0 00.5 6.2 
-                     31.6 31.6 0 000 12a31.6 31.6 0 00.5 5.8 3 3 0 002.1 2.1c1.8.6 9.4.6 9.4.6s7.6 
-                     0 9.4-.6a3 3 0 002.1-2.1A31.6 31.6 0 0024 12a31.6 31.6 0 00-.5-5.8zM9.8 
-                     15.5v-7l6 3.5-6 3.5z"/>
-        </svg>
-        Link YouTube
-    </button>
-
-    <!-- UPLOAD -->
-    <label
-        class="group px-8 py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95 
-        text-white font-semibold rounded-xl text-lg transition-all duration-200 
-        shadow-md hover:shadow-xl flex items-center gap-2 cursor-pointer">
-
-        <svg xmlns="http://www.w3.org/2000/svg" 
-             class="w-5 h-5 transition-transform group-hover:scale-110" 
-             fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12" />
-        </svg>
-
-        Enviar MP3/MP4
-        <input type="file"
-               id="fileInput"
-               accept=".mp3,.mp4,audio/*,video/*"
-               class="hidden"
-               onchange="arquivoSelecionado(event)">
-    </label>
+<div class="absolute bottom-0 left-1/2 w-[500px] h-[500px] bg-indigo-300 rounded-full blur-3xl opacity-20"></div>
 
 </div>
-        </section>
 
-        <!-- Área de transcrição -->
-        <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xl font-semibold">Transcrição em tempo real</h3>
-                <span id="status" class="text-sm text-gray-500">Aguardando...</span>
-            </div>
+<header class="site-header text-white shadow-sm">
 
-            <div id="transcript"
-                 class="text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
-                O texto transcrito aparecerá aqui...
-            </div>
-        </section>
+<div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
 
-    </main>
+<a href="index.html" class="flex items-center gap-2">
 
-    <!-- Scripts -->
-    <script>
-        function abrirYoutube() {
-            const link = prompt("Cole o link do YouTube:");
-            if (link) {
-                document.getElementById("status").innerText = "Processando vídeo do YouTube...";
-                console.log("Link recebido:", link);
+<img src="Image/image.png" class="w-8 h-8" alt="logo">
 
-                // Aqui você depois conecta com backend
-            }
-        }
+<h1 class="text-2xl font-bold text-indigo-700">
+Transcreva
+</h1>
 
-        function arquivoSelecionado(event) {
-            const file = event.target.files[0];
-            if (file) {
-                document.getElementById("status").innerText = "Processando arquivo: " + file.name;
-                console.log("Arquivo selecionado:", file.name);
+</a>
 
-                // Aqui você conecta com backend futuramente
-            }
-        }
-    </script>
+<a href="Sobre_Nos/index.html"
+class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
+Conheça a Equipe
+</a>
+
+</div>
+</header>
+
+<main class="max-w-5xl mx-auto px-4 py-10">
+
+<section class="text-center mb-12">
+
+<h2 class="text-4xl font-extrabold text-gray-800 mb-4">
+Converta áudio de aulas, reuniões e palestras em texto com IA
+</h2>
+
+<p class="text-xl text-gray-600 mb-8">
+Use o microfone, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição automaticamente.
+</p>
+
+<div class="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
+
+<button id="startBtn"
+class="group px-8 py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95
+text-white font-semibold rounded-xl text-lg transition-all duration-200
+shadow-md hover:shadow-xl flex items-center gap-2">
+
+🎤 Microfone
+
+</button>
+
+<button onclick="abrirYoutube()"
+class="group px-8 py-4 bg-red-600 hover:bg-red-700 active:scale-95
+text-white font-semibold rounded-xl text-lg transition-all duration-200
+shadow-md hover:shadow-xl flex items-center gap-2">
+
+▶ Link YouTube
+
+</button>
+
+<label
+class="group px-8 py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95
+text-white font-semibold rounded-xl text-lg transition-all duration-200
+shadow-md hover:shadow-xl flex items-center gap-2 cursor-pointer">
+
+Enviar MP3/MP4
+
+<input type="file"
+id="fileInput"
+accept=".mp3,.mp4,audio/*,video/*"
+class="hidden"
+onchange="arquivoSelecionado(event)">
+
+</label>
+
+</div>
+
+</section>
+
+<section class="bg-white rounded-2xl shadow-xl p-8 min-h-[420px] border border-gray-100">
+
+<div class="flex items-center justify-between mb-6">
+
+<h3 class="text-xl font-semibold">
+Transcrição em tempo real
+</h3>
+
+<span id="status"
+class="text-sm px-3 py-1 rounded-full bg-gray-100 text-gray-600">
+Aguardando
+</span>
+
+</div>
+
+<div id="transcript"
+class="text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap
+text-gray-700 bg-gray-50 p-4 rounded-lg">
+
+O texto transcrito aparecerá aqui...
+
+</div>
+
+</section>
+
+<section class="mt-16 grid md:grid-cols-3 gap-10 text-center">
+
+<div>
+
+<h4 class="font-semibold text-lg mb-2">
+1. Envie seu áudio
+</h4>
+
+<p class="text-gray-600">
+Use microfone, arquivo ou link do YouTube.
+</p>
+
+</div>
+
+<div>
+
+<h4 class="font-semibold text-lg mb-2">
+2. IA processa
+</h4>
+
+<p class="text-gray-600">
+O sistema converte fala em texto automaticamente.
+</p>
+
+</div>
+
+<div>
+
+<h4 class="font-semibold text-lg mb-2">
+3. Receba o texto
+</h4>
+
+<p class="text-gray-600">
+Transcrição clara para aulas e reuniões.
+</p>
+
+</div>
+
+</section>
+
+</main>
+
+<footer class="mt-16 bg-white border-t">
+
+<div class="max-w-5xl mx-auto px-4 py-6 text-center text-gray-500 text-sm">
+
+© 2026 Transcreva — Projeto acadêmico
+
+</div>
+
+</footer>
+
+<script>
+
+const startBtn = document.getElementById("startBtn");
+
+startBtn.addEventListener("click", () => {
+
+document.getElementById("status").innerText = "🎤 Gravando...";
+
+});
+
+function abrirYoutube(){
+
+const link = prompt("Cole o link do YouTube:");
+
+if(link){
+
+document.getElementById("status").innerText =
+"Processando vídeo do YouTube...";
+
+console.log("Link recebido:", link);
+
+}
+
+}
+
+function arquivoSelecionado(event){
+
+const file = event.target.files[0];
+
+if(file){
+
+document.getElementById("status").innerText =
+"Processando arquivo: " + file.name;
+
+console.log("Arquivo selecionado:", file.name);
+
+}
+
+}
+
+</script>
 
 </body>
 </html>
