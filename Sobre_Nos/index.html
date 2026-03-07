@@ -14,50 +14,91 @@
     <body class="bg-gray-50 min-h-screen relative">
 
         <!-- Fundo decorativo opcional -->
-        <div class="home-bg fixed inset-0 bg-gradient-to-br from-blue-50 to-purple-50 -z-10" aria-hidden="true"></div>
+        <div class="home-bg fixed inset-0 bg-emerald-50 -z-10" aria-hidden="true"></div>
 
-        <header class="site-header bg-white shadow-sm">
-            <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
-            
-            
-                <h1 class="text-2xl font-bold text-indigo-700">Transcreva</h1>
-                
-            
-           <a href="../index.html"
-                class="bg-indigo-600 text-white px-8 py-4 rounded-lg hover:bg-indigo-700 transition">
-                Voltar
-            </a>
+            <header class="bg-white shadow-sm">
+                <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
 
-            <p class="text-sm text-gray-600"> Áudio -> Texto -Transcreva o que você desejar
+                    <a href="index.html">
+                        <h1 class="text-2xl font-bold text-indigo-700">Transcreva</h1>
+                    </a>
 
-            </p>
-            </div>
-        </header>     
-        //embaixo é só o que deve mudar não colocando Nome, faculdade,etc
-        <main class="max-w-5xl mx-auto px-4 py-10">
-            <section class="text-center mb-10">
-                <h2 class="text-4xl font-extrabold text-gray-800 mb-4">Transcreva reuniões, aulas e palestras em tempo real</h2>
-                <p class="text-xl text-gray-600 mb-8">Clique no microfone e comece a falar — o texto aparece automaticamente.</p>
+                    <a href="../index.html"
+                        class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
+                        Voltar para Home
+                    </a>
 
-                <div class="flex flex-col sm:flex-row gap-4 justify-center">
-                    <button id="startBtn" class="px-8 py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-lg transition shadow-lg">
-                        Iniciar Transcrição 🎤
-                    </button>
-                    <button id="stopBtn" class="px-8 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-lg transition shadow-lg hidden">
-                        Parar Transcrição ■
-                    </button>
                 </div>
-            </section>
+            </header>     
+            <!--embaixo é só o que deve mudar não colocando Nome, faculdade,etc-->
+            <main class="max-w-5xl mx-auto px-4 py-10">
+                <section class="text-center mb-10 bg-[url('../Image/Header3.png')] bg-cover bg-center rounded-xl shadow-lg p-10">
+                    <h2 class="text-4xl font-extrabold text-gray-800 mb-4">Conheça a Equipe</h2>
+                    <p class="text-xl text-white-600 mb-8">Fique a vontade, para conhecer e a interagir com os membros da equipe.</p>
 
-            <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xl font-semibold">Transcrição em tempo real</h3>
-                <span id="status" class="text-sm text-gray-500">Aguardando...</span>
-            </div>
-            <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
-                O texto transcrito aparecerá aqui...
-            </div>
-            </section>
+                
+                </section>
+
+                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
+                    <div class="flex items-center justify-between mb-4">
+                        <img 
+                            src="../Image/FotoAndré.jpeg" 
+                            alt="Foto do Integrante 1" 
+                            class="Intergrante1 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
+                        > 
+                    
+                        <h3 class="Intergrante1">André Asta Olivera </h3>
+                        <span id="status" class="text-sm text-gray-500">Lider da Equipe</span>
+                    </div>
+                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
+                        Sobre mim...
+                        
+                        
+                    </div>
+                
+                </section>
+                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
+                    <div class="flex items-center justify-between mb-4">
+                        <img 
+                            src="" 
+                            alt="Foto do Integrante 2" 
+                            class="Intergrante2 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
+                        > 
+                        <h3 class="Intergrante2">Nome completo </h3>
+                        <span id="status" class="text-sm text-gray-500">Integrante 2</span>
+                    </div>
+                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
+                        Sobre mim...
+                    </div>
+                </section>
+                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
+                    <div class="flex items-center justify-between mb-4">
+                        <img 
+                            src=""" 
+                            alt="Foto do Integrante 3" 
+                            class="Intergrante3 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
+                        > 
+                        <h3 class="Intergrante3">nome Completo</h3>
+                        <span id="status" class="text-sm text-gray-500">Integrante 3</span>
+                    </div>
+                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
+                        Sobre mim...
+                    </div>
+                </section>
+                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
+                    <div class="flex items-center justify-between mb-4">
+                        <img 
+                            src="" 
+                            alt="Foto do Integrante 4" 
+                            class="Intergrante4 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
+                        > 
+                        <h3 class="Intergrante4">Nome completo </h3>
+                        <span id="status" class="text-sm text-gray-500">Integrante 4</span>
+                    </div>
+                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
+                        Sobre mim...
+                    </div>
+                </section>
         </main>
 
     
