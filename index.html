@@ -9,7 +9,7 @@
 
 <link rel="icon" type="image/png" href="Image/image.png" />
 
-<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="output.css">
 
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 
@@ -49,7 +49,7 @@ bg-[size:40px_40px]"></div>
 <img src="Image/image.png" class="w-8 h-8" alt="logo">
 
 <h1 class="text-2xl font-bold text-indigo-700">
-Transcreva
+Transcreva.IA
 </h1>
 
 </a>
@@ -71,7 +71,7 @@ Converta áudio de aulas, reuniões e palestras em texto com IA
 </h2>
 
 <p class="text-xl text-gray-600 mb-8">
-Use o microfone, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição automaticamente.
+Use o microfone, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição.
 </p>
 
 <div class="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
@@ -101,11 +101,13 @@ shadow-md hover:shadow-xl flex items-center gap-2 cursor-pointer">
 
 Enviar MP3/MP4
 
-<input type="file"
-id="fileInput"
-accept=".mp3,.mp4,audio/*,video/*"
-class="hidden"
-onchange="arquivoSelecionado(event)">
+<input 
+  type="file"
+  id="fileInput"
+  accept="audio/*,video/*"
+  class="hidden"
+  onchange="arquivoSelecionado(event)"
+/>
 
 </label>
 
@@ -190,47 +192,8 @@ Transcrição clara para aulas e reuniões.
 
 </footer>
 
-<script>
-
-const startBtn = document.getElementById("startBtn");
-
-startBtn.addEventListener("click", () => {
-
-document.getElementById("status").innerText = "🎤 Gravando...";
-
-});
-
-function abrirYoutube(){
-
-const link = prompt("Cole o link do YouTube:");
-
-if(link){
-
-document.getElementById("status").innerText =
-"Processando vídeo do YouTube...";
-
-console.log("Link recebido:", link);
-
-}
-
-}
-
-function arquivoSelecionado(event){
-
-const file = event.target.files[0];
-
-if(file){
-
-document.getElementById("status").innerText =
-"Processando arquivo: " + file.name;
-
-console.log("Arquivo selecionado:", file.name);
-
-}
-
-}
-
-</script>
+<script src="./js/base.js" defer></script>
+<!-- ou src="./js/base.js" se estiver numa pasta -->
 
 </body>
 </html>
