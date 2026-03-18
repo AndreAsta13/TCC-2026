@@ -1,107 +1,138 @@
+<!DOCTYPE html>
 <html lang="pt-br">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Transcreva — Áudio em Texto para Reuniões e Aulas</title>
-        <link rel="icon" type="image/png" href="Image/Logo.png" />
+<head>
 
-        <!-- Estilos básicos (você pode usar tailwind via CDN ou criar seu próprio) -->
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link rel="stylesheet" href="sobre_nos.css" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 
-        <meta name="description" content="Transcrição automática de áudio em tempo real para reuniões, aulas e palestras em português brasileiro." />
-    </head>
-    <body class="bg-gray-50 min-h-screen relative">
+<title>Equipe — Transcreva</title>
 
-        <!-- Fundo decorativo opcional -->
-        <div class="home-bg fixed inset-0 bg-emerald-50 -z-10" aria-hidden="true"></div>
+<link rel="stylesheet" href="../output.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 
-            <header class="bg-white shadow-sm">
-                <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+</head>
 
-                    <a href="index.html">
-                        <h1 class="text-2xl font-bold text-indigo-700">Transcreva</h1>
-                    </a>
+<body class="bg-gray-50 min-h-screen relative font-[Inter]">
 
-                    <a href="../index.html"
-                        class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
-                        Voltar para Home
-                    </a>
+<!-- FUNDO (igual HOME) -->
+<div class="home-bg fixed inset-0 bg-emerald-50 -z-10"></div>
 
-                </div>
-            </header>     
-            <!--embaixo é só o que deve mudar não colocando Nome, faculdade,etc-->
-            <main class="max-w-5xl mx-auto px-4 py-10">
-                <section class="text-center mb-10 bg-[url('../Image/Header3.png')] bg-cover bg-center rounded-xl shadow-lg p-10">
-                    <h2 class="text-4xl font-extrabold text-gray-800 mb-4">Conheça a Equipe</h2>
-                    <p class="text-xl text-white-600 mb-8">Fique a vontade, para conhecer e a interagir com os membros da equipe.</p>
+<div class="fixed inset-0 -z-20 opacity-20
+bg-[linear-gradient(to_right,#e5e7eb_1px,transparent_1px),
+linear-gradient(to_bottom,#e5e7eb_1px,transparent_1px)]
+bg-[size:40px_40px]"></div>
 
-                
-                </section>
+<div class="fixed inset-0 -z-10 overflow-hidden">
+<div class="absolute -top-40 -left-40 w-96 h-96 bg-purple-400 rounded-full blur-3xl opacity-30"></div>
+<div class="absolute top-40 -right-40 w-96 h-96 bg-blue-400 rounded-full blur-3xl opacity-30"></div>
+<div class="absolute bottom-0 left-1/2 w-[500px] h-[500px] bg-indigo-300 rounded-full blur-3xl opacity-20"></div>
+</div>
 
-                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
-                    <div class="flex items-center justify-between mb-4">
-                        <img 
-                            src="../Image/FotoAndré.jpeg" 
-                            alt="Foto do Integrante 1" 
-                            class="Intergrante1 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
-                        > 
-                    
-                        <h3 class="Intergrante1">André Asta Olivera </h3>
-                        <span id="status" class="text-sm text-gray-500">Lider da Equipe</span>
-                    </div>
-                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
-                        Estudante de Ciência da Computação na Universidade Paulista (UNIP)
-                        
-                        
-                    </div>
-                
-                </section>
-                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
-                    <div class="flex items-center justify-between mb-4">
-                        <img 
-                            src="" 
-                            alt="Foto do Integrante 2" 
-                            class="Intergrante2 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
-                        > 
-                        <h3 class="Intergrante2">Victor Hugo Almeida Cruz</h3>
-                        <span id="status" class="text-sm text-gray-500">Integrante 2</span>
-                    </div>
-                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
-                        Estudante de Ciência da Computação na Universidade Paulista (UNIP)
-                    </div>
-                </section>
-                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
-                    <div class="flex items-center justify-between mb-4">
-                        <img 
-                            src=""" 
-                            alt="Foto do Integrante 3" 
-                            class="Intergrante3 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
-                        > 
-                        <h3 class="Intergrante3">Felipe Jundi Nakao</h3>
-                        <span id="status" class="text-sm text-gray-500">Integrante 3</span>
-                    </div>
-                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
-                        Estudante de Ciência da Computação na Universidade Paulista (UNIP)
-                    </div>
-                </section>
-                <section class="bg-white rounded-xl shadow-lg p-6 min-h-[400px] border border-gray-200">
-                    <div class="flex items-center justify-between mb-4">
-                        <img 
-                            src="" 
-                            alt="Foto do Integrante 4" 
-                            class="Intergrante4 rounded-full w-32 h-32 object-cover border-4 border-gray-300 shadow-lg"
-                        > 
-                        <h3 class="Intergrante4">Davi de Simoni Ferreira </h3>
-                        <span id="status" class="text-sm text-gray-500">Integrante 4</span>
-                    </div>
-                    <div id="transcript" class="prose max-w-none text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap text-gray-800">
-                        Estudante de Ciência da Computação na Universidade Paulista (UNIP)
-                    </div>
-                </section>
-        </main>
+<!-- HEADER (igual HOME) -->
+<header class="site-header text-white shadow-sm">
+<div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
 
-    
+<a href="../index.html" class="flex items-center gap-2">
+<img src="../Image/image.png" class="w-8 h-8" alt="logo">
+<h1 class="text-2xl font-bold text-indigo-700">Transcreva.IA</h1>
+</a>
 
-    </body>
+<a href="../index.html"
+class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
+Voltar
+</a>
+
+</div>
+</header>
+
+<!-- HERO -->
+<main class="max-w-5xl mx-auto px-4 py-10">
+
+<section class="text-center mb-12">
+<h2 class="text-4xl font-extrabold text-gray-800 mb-4">
+Conheça a Equipe
+</h2>
+<p class="text-xl text-gray-600 mb-6">
+As pessoas por trás do Transcreva.IA
+</p>
+
+<!-- LINHA DECORATIVA -->
+<div class="w-24 h-1 bg-indigo-600 mx-auto rounded-full"></div>
+</section>
+
+<!-- GRID -->
+<section class="grid sm:grid-cols-2 gap-8">
+
+<!-- CARD -->
+<div class="bg-white rounded-2xl shadow-xl p-6 border border-gray-100
+hover:shadow-2xl hover:-translate-y-1 transition duration-300">
+<div class="flex items-center gap-4">
+<img src="../Image/FotoAndre.jpeg" class="w-20 h-20 rounded-full object-cover border-2 border-indigo-100">
+<div>
+<h3 class="font-semibold text-lg">André Asta Olivera</h3>
+<span class="text-sm text-indigo-600">Líder da equipe</span>
+</div>
+</div>
+<p class="mt-4 text-gray-600 text-sm leading-relaxed">
+Estudante de Ciência da Computação na UNIP.
+</p>
+</div>
+
+<!-- CARD -->
+<div class="bg-white rounded-2xl shadow-xl p-6 border border-gray-100
+hover:shadow-2xl hover:-translate-y-1 transition duration-300">
+<div class="flex items-center gap-4">
+<img src="" class="w-20 h-20 rounded-full object-cover border-2 border-indigo-100">
+<div>
+<h3 class="font-semibold text-lg">Victor Hugo Almeida Cruz</h3>
+<span class="text-sm text-indigo-600">Desenvolvedor</span>
+</div>
+</div>
+<p class="mt-4 text-gray-600 text-sm leading-relaxed">
+Focado em desenvolvimento e evolução contínua na área de tecnologia.
+</p>
+</div>
+
+<!-- CARD -->
+<div class="bg-white rounded-2xl shadow-xl p-6 border border-gray-100
+hover:shadow-2xl hover:-translate-y-1 transition duration-300">
+<div class="flex items-center gap-4">
+<img src="" class="w-20 h-20 rounded-full object-cover border-2 border-indigo-100">
+<div>
+<h3 class="font-semibold text-lg">Felipe Jundi Nakao</h3>
+<span class="text-sm text-indigo-600">Desenvolvedor</span>
+</div>
+</div>
+<p class="mt-4 text-gray-600 text-sm leading-relaxed">
+Estudante de Ciência da Computação na UNIP.
+</p>
+</div>
+
+<!-- CARD -->
+<div class="bg-white rounded-2xl shadow-xl p-6 border border-gray-100
+hover:shadow-2xl hover:-translate-y-1 transition duration-300">
+<div class="flex items-center gap-4">
+<img src="" class="w-20 h-20 rounded-full object-cover border-2 border-indigo-100">
+<div>
+<h3 class="font-semibold text-lg">Davi de Simoni Ferreira</h3>
+<span class="text-sm text-indigo-600">Desenvolvedor</span>
+</div>
+</div>
+<p class="mt-4 text-gray-600 text-sm leading-relaxed">
+Estudante de Ciência da Computação na UNIP.
+</p>
+</div>
+
+</section>
+
+</main>
+
+<!-- FOOTER (igual HOME) -->
+<footer class="mt-16 bg-white border-t">
+<div class="max-w-5xl mx-auto px-4 py-6 text-center text-gray-500 text-sm">
+© 2026 Transcreva — Projeto acadêmico
+</div>
+</footer>
+
+</body>
 </html>
