@@ -89,7 +89,16 @@ class="group px-8 py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95
 text-white font-semibold rounded-xl text-lg transition-all duration-200
 shadow-md hover:shadow-xl flex items-center gap-2">
 
-🎤 Microfone
+<span id="micIcon">🎤</span>
+Microfone
+
+<button id="stopBtn"
+class="group px-8 py-4 bg-orange-600 hover:bg-orange-700 active:scale-95
+text-white font-semibold rounded-xl text-lg transition-all duration-200
+shadow-md hover:shadow-xl flex items-center gap-2"
+style="background-color: orange;">
+
+⏹ Parar gravação
 
 </button>
 
@@ -143,6 +152,17 @@ class="text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap
 text-gray-700 bg-gray-50 p-4 rounded-lg">
 
 O texto transcrito aparecerá aqui...
+
+</div>
+
+<div class="mt-4 flex justify-end">
+
+<button id="downloadBtn"
+class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">
+
+Baixar transcrição
+
+</button>
 
 </div>
 
