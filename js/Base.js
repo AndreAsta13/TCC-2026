@@ -69,6 +69,110 @@ function abrirYoutube() {
   if (url) alert('Funcionalidade em desenvolvimento.');
 }
 
-document.getElementById('startBtn').addEventListener('click', () => {
-  alert('Microfone em desenvolvimento.');
-});
+// ===== MICROFONE =====
+
+let reconhecendo = false;
+let textoFinal = '';
+
+const SpeechRecognition =
+window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (SpeechRecognition) {
+
+const recognition = new SpeechRecognition();
+
+recognition.lang = "pt-BR";
+recognition.continuous = true;
+recognition.interimResults = true;
+
+recognition.onstart = () => {
+
+setStatus("Ouvindo...", "processando");
+
+document.getElementById("micIcon").style.animation = "pulse 1s infinite";
+
+};
+
+recognition.onresult = (event) => {
+
+let textoTemp = "";
+
+for (let i = event.resultIndex; i < event.results.length; i++) {
+
+const transcript = event.results[i][0].transcript;
+
+if (event.results[i].isFinal) {
+
+textoFinal += transcript + " ";
+
+} else {
+
+textoTemp += transcript;
+
+}
+
+}
+
+transcriptEl.textContent = corrigirTexto(textoFinal + textoTemp);
+
+};
+
+recognition.onend = () => {
+
+setStatus("Microfone parado", "aguardando");
+
+document.getElementById("micIcon").style.animation = "none";
+
+reconhecendo = false;
+
+};
+
+document.getElementById("startBtn").onclick = () => {
+
+if (!reconhecendo) {
+
+recognition.start();
+
+reconhecendo = true;
+
+}
+
+};
+
+document.getElementById("stopBtn").onclick = () => {
+
+recognition.stop();
+
+};
+
+}
+
+
+// ===== DOWNLOAD TRANSCRIÇÃO =====
+
+document.getElementById("downloadBtn").onclick = () => {
+
+const texto = transcriptEl.textContent;
+
+const blob = new Blob([texto], { type: "text/plain" });
+
+const link = document.createElement("a");
+
+link.href = URL.createObjectURL(blob);
+
+link.download = "transcricao.txt";
+
+link.click();
+
+};
+
+function corrigirTexto(texto){
+
+return texto
+.replace(/\s+/g," ")
+.replace(/\bvc\b/g,"você")
+.replace(/\btd\b/g,"tudo")
+.replace(/\bq\b/g,"que")
+.replace(/\bblz\b/g,"beleza")
+
+}
