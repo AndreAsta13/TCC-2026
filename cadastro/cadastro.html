@@ -1,115 +1,61 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-
 <title>Cadastro</title>
 
 <link rel="stylesheet" href="../css/output.css">
-
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-
 </head>
 
 <body class="bg-gray-50 min-h-screen font-[Inter]">
 
-<!-- FUNDO -->
-<div class="fixed inset-0 -z-20 opacity-20
-bg-[linear-gradient(to_right,#e5e7eb_1px,transparent_1px),
-linear-gradient(to_bottom,#e5e7eb_1px,transparent_1px)]
-bg-[size:40px_40px]"></div>
-
-<div class="fixed inset-0 -z-10 overflow-hidden">
-  <div class="absolute -top-40 -left-40 w-96 h-96 bg-purple-400 rounded-full blur-3xl opacity-30"></div>
-  <div class="absolute top-40 -right-40 w-96 h-96 bg-blue-400 rounded-full blur-3xl opacity-30"></div>
-</div>
-
-<!-- HEADER -->
-<header class="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
-
-  <h1 class="text-2xl font-bold text-indigo-700">
-    Transcreva.IA
-  </h1>
-
-  <div class="flex items-center gap-4">
-
-  <a href="../index.html"
-     class="bg-indigo-200 text-indigo-800 px-5 py-2 rounded-lg
-     hover:bg-indigo-300 transition">
-     Página inicial
-  </a>
-
-  <a href="login.html"
-     class="bg-indigo-600 text-white px-6 py-2 rounded-lg
-     hover:bg-indigo-700 transition">
-     Login
-  </a>
-
-</div>
-
-</header>
-
-<!-- CONTEÚDO -->
 <main class="flex items-center justify-center px-4 py-10">
+<div class="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl">
 
-<div class="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl border border-gray-100">
+<h2 class="text-2xl font-bold text-center mb-6">Cadastro</h2>
 
-<h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">
-Cadastro
-</h2>
+<form id="formCadastro" class="flex flex-col gap-4">
 
-<form class="flex flex-col gap-4">
+<input type="text" id="nome" placeholder="Nome" required class="px-4 py-3 border rounded-lg" />
 
-<input type="text"
-placeholder="Nome"
-required
-class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-/>
+<input type="email" id="email" placeholder="Email" required class="px-4 py-3 border rounded-lg" />
 
-<input type="email"
-placeholder="Email"
-required
-class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-/>
+<input type="password" id="senha" placeholder="Senha" required class="px-4 py-3 border rounded-lg" />
 
-<input type="password"
-placeholder="Senha"
-required
-class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-/>
-
-<div class="flex flex-col gap-1">
-<label class="text-sm text-gray-600">
-Você é deficiente?
-</label>
-
-<select
-class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-<option>Sim</option>
-<option>Não</option>
-</select>
-</div>
-
-<button type="submit"
-class="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold
-hover:bg-indigo-700 transition shadow-md hover:shadow-lg">
+<button type="submit" class="bg-indigo-600 text-white py-3 rounded-lg">
 Cadastrar
 </button>
 
 </form>
 
-<p class="text-center text-sm text-gray-500 mt-4">
-Já tem conta?
-<a href="login.html" class="text-indigo-600 hover:underline">
-Fazer login
-</a>
-</p>
-
 </div>
-
 </main>
+
+<script>
+document.getElementById("formCadastro").addEventListener("submit", async (e) => {
+  e.preventDefault();
+
+  const nome = document.getElementById("nome").value;
+  const email = document.getElementById("email").value;
+  const senha = document.getElementById("senha").value;
+
+  console.log("Enviando cadastro...");
+
+  const res = await fetch("http://localhost:3000/cadastro", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ nome, email, senha }),
+  });
+
+  const data = await res.json();
+
+  alert(data.sucesso ? "Cadastro realizado!" : data.erro);
+});
+</script>
 
 </body>
 </html>
