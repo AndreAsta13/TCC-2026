@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>Transcreva — Dashboard</title>
+
+<link rel="stylesheet" href="css/output.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+</head>
+
+<body class="bg-gray-50 min-h-screen font-[Inter]">
+
+<!-- HEADER -->
+<header class="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
+
+  <h1 class="text-2xl font-bold text-indigo-700">
+    Transcreva.IA
+  </h1>
+
+  <div class="flex items-center gap-4">
+
+    <div class="flex items-center gap-4">
+
+  <p id="userInfo" class="text-sm text-gray-700 font-medium"></p>
+
+  <button onclick="logout()"
+    class="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition shadow-md">
+    Sair
+  </button>
+
+</div>
+
+  </div>
+
+</header>
+
+<!-- CONTEÚDO -->
+<main class="max-w-5xl mx-auto px-4 py-10">
+
+<section class="text-center mb-12">
+
+<h2 class="text-4xl font-extrabold text-gray-800 mb-4">
+Seu ambiente de transcrição
+</h2>
+
+<p class="text-xl text-gray-600 mb-8">
+Grave, envie arquivos ou use YouTube para gerar transcrições.
+</p>
+
+<div class="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
+
+<button id="startBtn"
+class="group px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl">
+🎤 Iniciar gravação
+</button>
+
+<button id="stopBtn"
+class="group px-8 py-4 bg-orange-600 hover:bg-orange-700 active:scale-95
+text-white font-semibold rounded-xl text-lg transition-all duration-200
+shadow-md hover:shadow-xl flex items-center gap-2"
+style="background-color: orange;">
+
+⏹ Parar gravação
+
+</button>
+
+<button onclick="abrirYoutube()"
+class="group px-8 py-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl">
+▶ Link YouTube
+</button>
+
+<label class="group px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl cursor-pointer">
+Enviar MP3/MP4
+<input 
+  type="file"
+  id="fileInput"
+  accept="audio/*,video/*"
+  class="hidden"
+  onchange="arquivoSelecionado(event)"
+/>
+</label>
+
+</div>
+
+</section>
+
+<section class="bg-white rounded-2xl shadow-xl p-8 min-h-[420px] border border-gray-100">
+
+<div class="flex items-center justify-between mb-6">
+
+<h3 class="text-xl font-semibold">
+Transcrição em tempo real
+</h3>
+
+<span id="status"
+class="text-sm px-3 py-1 rounded-full bg-gray-100 text-gray-600">
+Aguardando
+</span>
+
+</div>
+
+<div id="transcript"
+class="text-lg leading-relaxed min-h-[300px] whitespace-pre-wrap
+text-gray-700 bg-gray-50 p-4 rounded-lg">
+
+O texto transcrito aparecerá aqui...
+
+</div>
+
+<div class="mt-4 flex justify-end">
+
+<button id="downloadBtn"
+class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">
+Baixar transcrição
+</button>
+
+</div>
+
+</section>
+
+</main>
+
+<!-- SCRIPT PRINCIPAL (mantém suas funções do index) -->
+<script src="js/Base.js"></script>
+
+<!-- CONTROLE DE LOGIN -->
+<script>
+// 🔒 PROTEÇÃO
+const user = localStorage.getItem("user");
+
+if (!user) {
+  window.location.href = "cadastro/login.html";
+}
+
+// 👤 MOSTRAR USUÁRIO
+document.getElementById("userInfo").innerText = "Logado como: " + user;
+
+// 🚪 LOGOUT
+function logout() {
+  localStorage.removeItem("user");
+  window.location.href = "cadastro/login.html";
+}
+</script>
+
+</body>
+</html>
