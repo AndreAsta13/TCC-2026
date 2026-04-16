@@ -11,7 +11,27 @@
 
 <body class="bg-gray-50 min-h-screen font-[Inter]">
 
+<!-- HEADER -->
+<header class="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
+
+  <h1 class="text-2xl font-bold text-indigo-700">
+    Transcreva.IA
+  </h1>
+
+  <div class="flex items-center gap-4">
+    
+    <a href="cadastro.html"
+       class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
+       Cadastro
+    </a>
+
+  </div>
+
+</header>
+
+<!-- CONTEÚDO -->
 <main class="flex items-center justify-center px-4 py-10">
+
 <div class="w-full max-w-md bg-white p-8 rounded-2xl shadow-xl">
 
 <h2 class="text-2xl font-bold text-center mb-6">Login</h2>
@@ -38,8 +58,6 @@ document.getElementById("formLogin").addEventListener("submit", async (e) => {
   const email = document.getElementById("email").value;
   const senha = document.getElementById("senha").value;
 
-  console.log("Tentando login...");
-
   const res = await fetch("http://localhost:3000/login", {
     method: "POST",
     headers: {
@@ -48,9 +66,15 @@ document.getElementById("formLogin").addEventListener("submit", async (e) => {
     body: JSON.stringify({ email, senha }),
   });
 
-  const data = await res.json();
+ const data = await res.json();
 
-  alert(data.sucesso ? "Login realizado!" : data.erro);
+if (data.sucesso) {
+  localStorage.setItem("user", email);
+  window.location.href = "../Dashboard.html"; // 👈 REDIRECIONA
+} else {
+  alert(data.erro);
+}
+  
 });
 </script>
 
