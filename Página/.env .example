@@ -1,0 +1,21 @@
+# ════════════════════════════════════════════════
+# Transcreva.IA — Variáveis de Ambiente
+# Copie este arquivo para .env e preencha os valores
+# ════════════════════════════════════════════════
+
+# ── API de Transcrição ──────────────────────────
+GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# ── Backend de armazenamento ────────────────────
+# Opções: local | s3 | gcs
+STORAGE_BACKEND=local
+
+# ── AWS S3 (se STORAGE_BACKEND=s3) ─────────────
+AWS_BUCKET_NAME=transcreva-ground-truth
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
+AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# ── Google Cloud Storage (se STORAGE_BACKEND=gcs)
+GCS_BUCKET_NAME=transcreva-ground-truth
+GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/credenciais-gcs.json

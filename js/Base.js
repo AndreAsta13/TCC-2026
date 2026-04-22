@@ -66,7 +66,7 @@ function arquivoSelecionado(event) {
 
 function abrirYoutube() {
   const url = prompt('Cole o link do YouTube:');
-  if (url) alert('Funcionalidade em desenvolvimento.');
+  if (url) alert('Necessário entrar  na conta.');
 }
 
 // ===== MICROFONE =====
@@ -175,4 +175,10 @@ return texto
 .replace(/\bq\b/g,"que")
 .replace(/\bblz\b/g,"beleza")
 
+}
+function verificarLogin(event) {
+  if (!usuarioLogado) { // substitua pela sua verificação real
+    event.preventDefault();
+    alert("⚠️ Você precisa estar logado para enviar arquivos.");
+  }
 }

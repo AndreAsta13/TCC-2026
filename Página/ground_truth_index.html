@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ground Truth — Transcreva.IA</title>
+<link rel="icon" type="image/png" href="../Image/image.png" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --emerald: #059669; --emerald-light: #d1fae5; --emerald-dark: #047857;
+    --indigo:  #4f46e5; --indigo-light: #e0e7ff; --indigo-dark:  #3730a3;
+    --amber:   #d97706; --amber-light:  #fef3c7;
+    --red:     #dc2626; --red-light:    #fee2e2;
+    --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb;
+    --gray-400: #9ca3af; --gray-600: #4b5563; --gray-800: #1f2937;
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #f0fdf4;
+    min-height: 100vh;
+    color: var(--gray-800);
+  }
+
+  /* ── grade decorativa ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: -2;
+    background:
+      linear-gradient(to right,  #e5e7eb 1px, transparent 1px),
+      linear-gradient(to bottom, #e5e7eb 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: .25;
+  }
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: -1;
+    background:
+      radial-gradient(ellipse 60% 40% at 10% 10%, rgba(167,243,208,.4) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 50% at 90% 20%, rgba(199,210,254,.35) 0%, transparent 60%),
+      radial-gradient(ellipse 70% 50% at 50% 100%, rgba(165,180,252,.25) 0%, transparent 60%);
+  }
+
+  /* ── header ── */
+  header {
+    background: rgba(255,255,255,.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--gray-200);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .header-inner {
+    max-width: 1100px; margin: 0 auto;
+    padding: 14px 24px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+  .logo img { width: 32px; height: 32px; }
+  .logo span { font-size: 20px; font-weight: 800; color: var(--indigo); }
+  .breadcrumb {
+    font-size: 13px; color: var(--gray-400);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .breadcrumb a { color: var(--indigo); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .storage-pill {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+    padding: 5px 12px; border-radius: 99px;
+    background: var(--emerald-light); color: var(--emerald-dark);
+    border: 1px solid #a7f3d0;
+  }
+  .storage-pill .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--emerald);
+    animation: pulse-dot 2s infinite;
+  }
+  @keyframes pulse-dot {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:.5; transform:scale(1.4); }
+  }
+
+  /* ── layout ── */
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  .page-title {
+    font-size: 28px; font-weight: 800; color: var(--gray-800);
+    margin-bottom: 4px;
+  }
+  .page-sub { font-size: 15px; color: var(--gray-600); margin-bottom: 28px; }
+
+  /* ── métricas ── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px; margin-bottom: 28px;
+  }
+  .metric-card {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 14px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .metric-label { font-size: 11px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .metric-value { font-size: 26px; font-weight: 800; }
+  .metric-sub   { font-size: 11px; color: var(--gray-400); margin-top: 3px; }
+  .green  { color: var(--emerald); }
+  .amber  { color: var(--amber); }
+  .red    { color: var(--red); }
+  .indigo { color: var(--indigo); }
+
+  /* ── card branco ── */
+  .card {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05);
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .card-header {
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap;
+  }
+  .card-title { font-size: 15px; font-weight: 700; }
+  .card-body  { padding: 22px; }
+
+  /* ── tabs ── */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab {
+    padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--gray-200); background: transparent;
+    color: var(--gray-600); cursor: pointer; transition: all .15s;
+  }
+  .tab:hover   { background: var(--gray-100); }
+  .tab.active  { background: var(--indigo); color: white; border-color: var(--indigo); }
+
+  /* ── tabela dataset ── */
+  .dataset-table { width: 100%; border-collapse: collapse; }
+  .dataset-table th {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--gray-400);
+    padding: 10px 14px; text-align: left;
+    border-bottom: 1px solid var(--gray-100);
+    background: var(--gray-50);
+  }
+  .dataset-table td {
+    padding: 12px 14px; font-size: 13px;
+    border-bottom: 1px solid var(--gray-100);
+    color: var(--gray-800);
+  }
+  .dataset-table tr:last-child td { border-bottom: none; }
+  .dataset-table tr:hover td { background: #f0fdf4; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 99px;
+  }
+  .badge-green  { background: var(--emerald-light); color: var(--emerald-dark); }
+  .badge-amber  { background: var(--amber-light);   color: var(--amber); }
+  .badge-red    { background: var(--red-light);      color: var(--red); }
+  .badge-indigo { background: var(--indigo-light);   color: var(--indigo-dark); }
+
+  .source-chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 99px;
+    border: 1px solid var(--gray-200); color: var(--gray-600);
+    background: var(--gray-50);
+  }
+
+  /* barra de WER */
+  .wer-cell { display: flex; align-items: center; gap: 8px; }
+  .wer-bar-bg { flex: 1; height: 5px; border-radius: 3px; background: var(--gray-100); overflow: hidden; min-width: 60px; }
+  .wer-bar-fill { height: 100%; border-radius: 3px; transition: width .6s ease; }
+
+  /* ── formulário adicionar ── */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
+
+  .field-label { font-size: 12px; font-weight: 600; color: var(--gray-600); margin-bottom: 6px; display: block; }
+  .field-hint  { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
+
+  .drop-zone {
+    border: 2px dashed var(--gray-200); border-radius: 12px;
+    padding: 28px; text-align: center; cursor: pointer;
+    transition: border-color .2s, background .2s;
+    color: var(--gray-400); font-size: 13px;
+  }
+  .drop-zone:hover { border-color: var(--indigo); background: var(--indigo-light); color: var(--indigo); }
+  .drop-zone.over  { border-color: var(--emerald); background: var(--emerald-light); }
+  .drop-icon { font-size: 28px; margin-bottom: 8px; }
+
+  textarea.gt-input {
+    width: 100%; min-height: 140px; resize: vertical;
+    border: 1px solid var(--gray-200); border-radius: 10px;
+    padding: 12px; font-size: 13px; font-family: 'Inter', sans-serif;
+    line-height: 1.6; color: var(--gray-800);
+    transition: border-color .15s;
+  }
+  textarea.gt-input:focus { outline: none; border-color: var(--indigo); }
+
+  select.gt-select {
+    width: 100%; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid var(--gray-200); font-size: 13px;
+    font-family: 'Inter', sans-serif; color: var(--gray-800);
+    background: white; cursor: pointer;
+  }
+  select.gt-select:focus { outline: none; border-color: var(--indigo); }
+
+  .btn {
+    padding: 9px 20px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    border: 1px solid transparent; cursor: pointer; transition: all .15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-primary { background: var(--indigo); color: white; }
+  .btn-primary:hover { background: var(--indigo-dark); }
+  .btn-outline { background: white; border-color: var(--gray-200); color: var(--gray-800); }
+  .btn-outline:hover { background: var(--gray-100); }
+  .btn-emerald { background: var(--emerald); color: white; }
+  .btn-emerald:hover { background: var(--emerald-dark); }
+
+  /* ── análise WER ── */
+  .wer-formula {
+    background: var(--gray-50); border: 1px solid var(--gray-200);
+    border-radius: 10px; padding: 14px 18px;
+    font-family: monospace; font-size: 14px; color: var(--indigo-dark);
+    margin-bottom: 18px; font-weight: 600;
+  }
+  .wer-legend {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px; margin-bottom: 20px;
+  }
+  .legend-item {
+    background: var(--indigo-light); border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .legend-key   { font-size: 16px; font-weight: 800; color: var(--indigo); }
+  .legend-desc  { font-size: 11px; color: var(--indigo-dark); margin-top: 2px; }
+
+  .wer-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid var(--gray-100);
+  }
+  .wer-row:last-child { border-bottom: none; }
+  .wer-filename { font-size: 12px; color: var(--gray-600); width: 200px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── storage status ── */
+  .storage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 640px) { .storage-grid { grid-template-columns: 1fr; } }
+
+  .storage-card {
+    border: 1.5px solid var(--gray-200); border-radius: 12px;
+    padding: 18px; text-align: center; cursor: pointer;
+    transition: all .2s;
+  }
+  .storage-card:hover   { border-color: var(--indigo); }
+  .storage-card.active  { border-color: var(--emerald); background: #f0fdf4; }
+  .storage-card.active .storage-name { color: var(--emerald-dark); }
+  .storage-logo { font-size: 28px; margin-bottom: 8px; }
+  .storage-name { font-size: 14px; font-weight: 700; color: var(--gray-800); margin-bottom: 4px; }
+  .storage-desc { font-size: 11px; color: var(--gray-400); }
+  .storage-status-label {
+    margin-top: 10px; font-size: 11px; font-weight: 600;
+    padding: 3px 10px; border-radius: 99px; display: inline-block;
+  }
+
+  /* ── feedback toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    padding: 12px 20px; border-radius: 10px;
+    font-size: 13px; font-weight: 600; color: white;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+    transform: translateY(80px); opacity: 0;
+    transition: all .3s ease; z-index: 999;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { background: var(--emerald); }
+  #toast.error   { background: var(--red); }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+</style>
+</head>
+<body>
+
+<div id="toast"></div>
+
+<header>
+  <div class="header-inner">
+    <a href="../index.html" class="logo">
+      <img src="../Image/image.png" alt="logo">
+      <span>Transcreva.IA</span>
+    </a>
+    <div class="breadcrumb">
+      <span>/</span>
+      <a href="../index.html">Início</a>
+      <span>/</span>
+      <span>Ground Truth</span>
+    </div>
+    <div class="storage-pill" id="storageStatus">
+      <div class="dot"></div>
+      <span id="storageLabel">verificando...</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <h1 class="page-title">Dataset de Ground Truth</h1>
+  <p class="page-sub">Conjunto de validação para medição de acurácia (WER/CER) do Transcreva.IA</p>
+
+  <!-- métricas -->
+  <div class="metrics-grid" id="metricsGrid">
+    <div class="metric-card">
+      <div class="metric-label">Total de arquivos</div>
+      <div class="metric-value indigo" id="m-total">—</div>
+      <div class="metric-sub">meta: 5–10 arquivos</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">WER médio</div>
+      <div class="metric-value" id="m-wer">—</div>
+      <div class="metric-sub">Word Error Rate</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Melhor WER</div>
+      <div class="metric-value green" id="m-best">—</div>
+      <div class="metric-sub">menor erro</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Pior WER</div>
+      <div class="metric-value" id="m-worst">—</div>
+      <div class="metric-sub">maior erro</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Palavras GT</div>
+      <div class="metric-value indigo" id="m-words">—</div>
+      <div class="metric-sub">total transcrito</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Validados</div>
+      <div class="metric-value green" id="m-valid">—</div>
+      <div class="metric-sub">prontos para teste</div>
+    </div>
+  </div>
+
+  <!-- tabs -->
+  <div class="card">
+    <div class="card-header">
+      <div class="tabs">
+        <button class="tab active" onclick="showTab('dataset', this)">📋 Dataset</button>
+        <button class="tab" onclick="showTab('wer', this)">📊 Análise WER</button>
+        <button class="tab" onclick="showTab('adicionar', this)">➕ Adicionar áudio</button>
+        <button class="tab" onclick="showTab('storage', this)">☁️ Armazenamento</button>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline" onclick="carregarDados()">↻ Atualizar</button>
+        <button class="btn btn-emerald" onclick="exportarDataset()">⬇ Exportar JSON</button>
+      </div>
+    </div>
+
+    <!-- ── Tab: Dataset ── -->
+    <div id="tab-dataset" class="tab-content active">
+      <div style="overflow-x:auto;">
+        <table class="dataset-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Arquivo</th>
+              <th>Fonte</th>
+              <th>Palavras GT</th>
+              <th>WER</th>
+              <th>CER</th>
+              <th>Storage</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="datasetBody">
+            <tr><td colspan="8" style="text-align:center; color:var(--gray-400); padding:32px;">Carregando dataset...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Tab: WER ── -->
+    <div id="tab-wer" class="tab-content">
+      <div class="card-body">
+        <div class="wer-formula">WER = ( S + D + I ) / N × 100%</div>
+        <div class="wer-legend">
+          <div class="legend-item"><div class="legend-key">S</div><div class="legend-desc">Substituições</div></div>
+          <div class="legend-item"><div class="legend-key">D</div><div class="legend-desc">Deleções</div></div>
+          <div class="legend-item"><div class="legend-key">I</div><div class="legend-desc">Inserções</div></div>
+          <div class="legend-item"><div class="legend-key">N</div><div class="legend-desc">Palavras no GT</div></div>
+        </div>
+        <div id="werChart"></div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Adicionar ── -->
+    <div id="tab-adicionar" class="tab-content">
+      <div class="card-body">
+        <div class="form-grid">
+          <div>
+            <label class="field-label">Arquivo de áudio</label>
+            <div class="drop-zone" id="dropZone" onclick="document.getElementById('audioInput').click()">
+              <div class="drop-icon">🎵</div>
+              <div id="dropText">Clique ou arraste o arquivo aqui</div>
+              <div class="field-hint" style="margin-top:6px;">MP3, WAV, M4A, WebM — máx. 100 MB</div>
+            </div>
+            <input type="file" id="audioInput" accept="audio/*,video/*" style="display:none" onchange="arquivoEscolhido(this)">
+
+            <label class="field-label" style="margin-top:16px;">Fonte do áudio</label>
+            <select class="gt-select" id="fonteSelect">
+              <option value="">Selecione a origem...</option>
+              <option value="Common Voice">Mozilla Common Voice</option>
+              <option value="LibriSpeech">LibriSpeech PT</option>
+              <option value="Podcast Acadêmico">Podcast Acadêmico</option>
+              <option value="YouTube">YouTube (domínio público)</option>
+              <option value="Gravação própria">Gravação própria</option>
+            </select>
+
+            <div class="field-hint" style="margin-top:10px; padding:10px; background:var(--indigo-light); border-radius:8px; color:var(--indigo-dark);">
+              💡 <strong>Dica:</strong> Use áudios de domínio público para garantir conformidade legal no dataset acadêmico.
+            </div>
+          </div>
+
+          <div>
+            <label class="field-label">Transcrição manual (Ground Truth)</label>
+            <textarea class="gt-input" id="gtTextarea"
+              placeholder="Digite aqui a transcrição exata e completa do áudio, palavra por palavra. Esta será a referência para o cálculo do WER.&#10;&#10;Ex: Bom dia professores e alunos presentes aqui nesta aula inaugural do curso de inteligência artificial..."></textarea>
+            <div class="field-hint">
+              <span id="wordCount">0 palavras</span> digitadas
+            </div>
+
+            <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+              <button class="btn btn-primary" onclick="enviarParaServidor()">
+                ⬆ Adicionar ao dataset
+              </button>
+              <button class="btn btn-outline" onclick="limparFormulario()">
+                Limpar
+              </button>
+            </div>
+            <div id="uploadProgress" style="display:none; margin-top:12px;">
+              <div style="font-size:12px; color:var(--gray-600); margin-bottom:6px;" id="progressText">Enviando...</div>
+              <div style="height:4px; background:var(--gray-100); border-radius:2px; overflow:hidden;">
+                <div id="progressBar" style="height:100%; width:0%; background:var(--indigo); border-radius:2px; transition:width .3s;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Storage ── -->
+    <div id="tab-storage" class="tab-content">
+      <div class="card-body">
+        <p style="font-size:13px; color:var(--gray-600); margin-bottom:18px;">
+          Configure a variável <code style="background:var(--gray-100); padding:2px 6px; border-radius:4px; font-size:12px;">STORAGE_BACKEND</code> no arquivo <code style="background:var(--gray-100); padding:2px 6px; border-radius:4px; font-size:12px;">.env</code> para alternar entre os backends.
+        </p>
+
+        <div class="storage-grid">
+          <div class="storage-card" id="card-local">
+            <div class="storage-logo">💾</div>
+            <div class="storage-name">Local (padrão)</div>
+            <div class="storage-desc">Armazena na pasta <code>ground_truth_dataset/</code> do servidor</div>
+            <div class="storage-status-label" style="background:var(--gray-100); color:var(--gray-600);">STORAGE_BACKEND=local</div>
+          </div>
+          <div class="storage-card" id="card-s3">
+            <div class="storage-logo">🪣</div>
+            <div class="storage-name">AWS S3</div>
+            <div class="storage-desc">Bucket S3 escalável. Configure as credenciais no <code>.env</code></div>
+            <div class="storage-status-label" style="background:var(--amber-light); color:var(--amber);">STORAGE_BACKEND=s3</div>
+          </div>
+          <div class="storage-card" id="card-gcs">
+            <div class="storage-logo">☁️</div>
+            <div class="storage-name">Google Cloud Storage</div>
+            <div class="storage-desc">Bucket GCS com credenciais de conta de serviço JSON</div>
+            <div class="storage-status-label" style="background:#e8f0fe; color:#1a73e8;">STORAGE_BACKEND=gcs</div>
+          </div>
+        </div>
+
+        <!-- variáveis de ambiente -->
+        <div style="margin-top:24px;">
+          <p class="field-label">Exemplo de .env</p>
+          <pre style="background:var(--gray-800); color:#a3e635; border-radius:10px; padding:16px; font-size:12px; overflow-x:auto; line-height:1.7;">GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
+
+# ── escolha um: local | s3 | gcs ──
+STORAGE_BACKEND=s3
+
+# ── AWS S3 ──
+AWS_BUCKET_NAME=transcreva-ground-truth
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxx
+
+# ── Google Cloud Storage ──
+GCS_BUCKET_NAME=transcreva-ground-truth
+GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/credenciais.json</pre>
+        </div>
+
+        <div style="margin-top:16px;">
+          <p class="field-label">Instalar dependências</p>
+          <pre style="background:var(--gray-800); color:#a3e635; border-radius:10px; padding:16px; font-size:12px;">pip install flask flask-cors groq boto3 google-cloud-storage jiwer python-dotenv</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = 'http://localhost:5000';
+
+/* ══ Tabs ══════════════════════════════════════════════════════════════════ */
+function showTab(id, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  btn.classList.add('active');
+  if (id === 'wer') renderWerChart();
+}
+
+/* ══ Toast ══════════════════════════════════════════════════════════════════ */
+function toast(msg, tipo = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + tipo;
+  setTimeout(() => { t.className = ''; }, 3200);
+}
+
+/* ══ Cores WER ══════════════════════════════════════════════════════════════ */
+function werColor(v) {
+  if (v === null || v === undefined) return 'var(--gray-400)';
+  if (v < 7)  return 'var(--emerald)';
+  if (v < 12) return 'var(--amber)';
+  return 'var(--red)';
+}
+function werBadge(v) {
+  if (v === null || v === undefined) return '<span class="badge badge-indigo">pendente</span>';
+  const cls = v < 7 ? 'badge-green' : v < 12 ? 'badge-amber' : 'badge-red';
+  return `<span class="badge ${cls}">${v.toFixed(1)}%</span>`;
+}
+function statusBadge(s) {
+  const map = {
+    validado: 'badge-green',
+    revisão:  'badge-amber',
+    pendente: 'badge-indigo',
+  };
+  return `<span class="badge ${map[s] || 'badge-indigo'}">${s}</span>`;
+}
+function storageBadge(s) {
+  const icons = { local:'💾', s3:'🪣', gcs:'☁️' };
+  return `<span class="source-chip">${icons[s] || ''} ${s || 'local'}</span>`;
+}
+
+/* ══ Carregar dados ════════════════════════════════════════════════════════ */
+let datasetCache = [];
+
+async function carregarDados() {
+  try {
+    const [resumo, lista] = await Promise.all([
+      fetch(`${API}/gt/resumo`).then(r => r.json()),
+      fetch(`${API}/gt/listar`).then(r => r.json()),
+    ]);
+    datasetCache = lista;
+    atualizarMetricas(resumo);
+    renderDataset(lista);
+    if (document.getElementById('tab-wer').classList.contains('active')) renderWerChart();
+  } catch {
+    renderDataset([]);
+    // servidor offline — usa dados demo
+    usarDadosDemo();
+  }
+}
+
+function usarDadosDemo() {
+  datasetCache = [
+    { id:'a1', filename:'entrevista_cv_01.mp3',  fonte:'Common Voice',      palavras_gt:312, wer:5.2,  cer:2.1, storage:'s3',   status:'validado' },
+    { id:'a2', filename:'palestra_ia_02.wav',     fonte:'YouTube',           palavras_gt:604, wer:11.7, cer:5.3, storage:'s3',   status:'validado' },
+    { id:'a3', filename:'reuniao_03.m4a',         fonte:'Gravação própria',  palavras_gt:781, wer:7.9,  cer:3.4, storage:'local',status:'validado' },
+    { id:'a4', filename:'aula_usp_04.mp3',        fonte:'Podcast Acadêmico', palavras_gt:556, wer:4.1,  cer:1.8, storage:'gcs',  status:'validado' },
+    { id:'a5', filename:'seminario_05.wav',       fonte:'Common Voice',      palavras_gt:344, wer:9.3,  cer:4.1, storage:'s3',   status:'revisão'  },
+    { id:'a6', filename:'debate_tecnico_06.mp3',  fonte:'Podcast Acadêmico', palavras_gt:499, wer:13.8, cer:6.2, storage:'local',status:'revisão'  },
+    { id:'a7', filename:'conferencia_07.m4a',     fonte:'YouTube',           palavras_gt:751, wer:6.6,  cer:2.9, storage:'gcs',  status:'validado' },
+  ];
+  const wers = datasetCache.map(d => d.wer);
+  atualizarMetricas({
+    total: datasetCache.length,
+    validados: 5, pendentes: 0,
+    wer_medio: (wers.reduce((a,b)=>a+b,0)/wers.length).toFixed(2),
+    wer_melhor: Math.min(...wers).toFixed(2),
+    wer_pior:   Math.max(...wers).toFixed(2),
+    palavras_total: datasetCache.reduce((a,d)=>a+d.palavras_gt,0),
+    storage_backend: 'demo',
+  });
+  renderDataset(datasetCache);
+}
+
+function atualizarMetricas(r) {
+  document.getElementById('m-total').textContent = r.total ?? '—';
+  const wmEl = document.getElementById('m-wer');
+  wmEl.textContent = r.wer_medio != null ? r.wer_medio + '%' : '—';
+  wmEl.className = 'metric-value ' + (r.wer_medio < 7 ? 'green' : r.wer_medio < 12 ? 'amber' : 'red');
+  const wbEl = document.getElementById('m-best');
+  wbEl.textContent = r.wer_melhor != null ? r.wer_melhor + '%' : '—';
+  const wwEl = document.getElementById('m-worst');
+  wwEl.textContent = r.wer_pior != null ? r.wer_pior + '%' : '—';
+  wwEl.className = 'metric-value ' + (r.wer_pior >= 12 ? 'red' : 'amber');
+  document.getElementById('m-words').textContent = (r.palavras_total ?? 0).toLocaleString('pt-BR');
+  document.getElementById('m-valid').textContent = r.validados ?? '—';
+
+  const label = document.getElementById('storageLabel');
+  const pill  = document.getElementById('storageStatus');
+  const be    = r.storage_backend || 'local';
+  label.textContent = be.toUpperCase();
+  if (be === 'demo') {
+    pill.style.background = '#fef3c7'; pill.style.color = '#92400e';
+    pill.style.borderColor = '#fcd34d';
+  }
+  document.querySelectorAll('.storage-card').forEach(c => c.classList.remove('active'));
+  const sc = document.getElementById('card-' + be);
+  if (sc) sc.classList.add('active');
+}
+
+function renderDataset(lista) {
+  const tbody = document.getElementById('datasetBody');
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:32px;">Nenhum arquivo no dataset ainda.</td></tr>';
+    return;
+  }
+  const maxWer = Math.max(...lista.map(d => d.wer || 0), 1);
+  tbody.innerHTML = lista.map((d, i) => `
+    <tr>
+      <td style="color:var(--gray-400); font-size:12px;">${i + 1}</td>
+      <td style="font-weight:500; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${d.filename}">${d.filename}</td>
+      <td><span class="source-chip">${d.fonte || '—'}</span></td>
+      <td>${(d.palavras_gt || 0).toLocaleString('pt-BR')}</td>
+      <td>
+        <div class="wer-cell">
+          <span style="font-weight:700; color:${werColor(d.wer)}; min-width:40px; font-size:13px;">${d.wer != null ? d.wer.toFixed(1)+'%' : '—'}</span>
+          <div class="wer-bar-bg">
+            <div class="wer-bar-fill" style="width:${d.wer != null ? Math.min((d.wer/maxWer)*100,100).toFixed(1) : 0}%; background:${werColor(d.wer)};"></div>
+          </div>
+        </div>
+      </td>
+      <td style="color:var(--gray-600);">${d.cer != null ? d.cer.toFixed(1)+'%' : '—'}</td>
+      <td>${storageBadge(d.storage)}</td>
+      <td>${statusBadge(d.status)}</td>
+    </tr>
+  `).join('');
+}
+
+/* ══ WER Chart ════════════════════════════════════════════════════════════ */
+function renderWerChart() {
+  const el = document.getElementById('werChart');
+  if (!datasetCache.length) { el.innerHTML = '<p style="color:var(--gray-400);text-align:center;">Nenhum dado disponível.</p>'; return; }
+  const max = Math.max(...datasetCache.map(d => d.wer || 0), 1);
+  el.innerHTML = datasetCache.map(d => `
+    <div class="wer-row">
+      <div class="wer-filename" title="${d.filename}">${d.filename}</div>
+      <div class="wer-bar-bg" style="flex:1;">
+        <div class="wer-bar-fill" style="width:${d.wer != null ? ((d.wer/max)*100).toFixed(1) : 0}%; background:${werColor(d.wer)};"></div>
+      </div>
+      <span style="font-size:13px;font-weight:700;color:${werColor(d.wer)};min-width:44px;text-align:right;">${d.wer != null ? d.wer.toFixed(1)+'%' : '—'}</span>
+      <span style="font-size:11px;color:var(--gray-400);min-width:80px;text-align:right;">CER: ${d.cer != null ? d.cer.toFixed(1)+'%' : '—'}</span>
+    </div>
+  `).join('');
+}
+
+/* ══ Drop zone ════════════════════════════════════════════════════════════ */
+let arquivoSelecionado = null;
+
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) definirArquivo(f);
+});
+
+function arquivoEscolhido(input) {
+  if (input.files[0]) definirArquivo(input.files[0]);
+}
+function definirArquivo(f) {
+  arquivoSelecionado = f;
+  document.getElementById('dropText').textContent = '✔ ' + f.name;
+  dz.style.borderColor = 'var(--emerald)';
+  dz.style.background  = 'var(--emerald-light)';
+  dz.style.color       = 'var(--emerald-dark)';
+}
+
+/* ── contador de palavras ── */
+document.getElementById('gtTextarea').addEventListener('input', function() {
+  const n = this.value.trim().split(/\s+/).filter(Boolean).length;
+  document.getElementById('wordCount').textContent = n.toLocaleString('pt-BR');
+});
+
+/* ══ Enviar para servidor ═════════════════════════════════════════════════ */
+async function enviarParaServidor() {
+  const gt    = document.getElementById('gtTextarea').value.trim();
+  const fonte = document.getElementById('fonteSelect').value;
+  if (!arquivoSelecionado) { toast('Selecione um arquivo de áudio.', 'error'); return; }
+  if (!gt)    { toast('Digite a transcrição ground truth.', 'error'); return; }
+  if (!fonte) { toast('Selecione a fonte do áudio.', 'error'); return; }
+
+  const form = new FormData();
+  form.append('file', arquivoSelecionado);
+  form.append('transcricao', gt);
+  form.append('fonte', fonte);
+
+  const prog  = document.getElementById('uploadProgress');
+  const pBar  = document.getElementById('progressBar');
+  const pText = document.getElementById('progressText');
+  prog.style.display = 'block';
+  pBar.style.width   = '30%';
+  pText.textContent  = 'Enviando arquivo...';
+
+  try {
+    const res = await fetch(`${API}/gt/adicionar`, { method: 'POST', body: form });
+    pBar.style.width = '80%';
+    pText.textContent = 'Transcrevendo e calculando WER...';
+    const data = await res.json();
+    pBar.style.width = '100%';
+
+    if (data.sucesso) {
+      toast(`Adicionado! WER: ${data.entrada.wer != null ? data.entrada.wer + '%' : 'pendente'}`, 'success');
+      limparFormulario();
+      await carregarDados();
+    } else {
+      toast(data.erro || 'Erro ao adicionar.', 'error');
+    }
+  } catch {
+    toast('Servidor offline. Verifique se ground_truth_server.py está rodando.', 'error');
+  } finally {
+    setTimeout(() => { prog.style.display = 'none'; pBar.style.width = '0%'; }, 1200);
+  }
+}
+
+function limparFormulario() {
+  arquivoSelecionado = null;
+  document.getElementById('gtTextarea').value   = '';
+  document.getElementById('fonteSelect').value  = '';
+  document.getElementById('audioInput').value   = '';
+  document.getElementById('dropText').textContent = 'Clique ou arraste o arquivo aqui';
+  document.getElementById('wordCount').textContent = '0';
+  dz.style.borderColor = ''; dz.style.background = ''; dz.style.color = '';
+}
+
+/* ══ Exportar JSON ════════════════════════════════════════════════════════ */
+function exportarDataset() {
+  const blob = new Blob([JSON.stringify(datasetCache, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ground_truth_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  toast('Dataset exportado!', 'success');
+}
+
+/* ══ Init ═════════════════════════════════════════════════════════════════ */
+carregarDados();
+</script>
+</body>
+</html>
