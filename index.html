@@ -112,20 +112,20 @@ shadow-md hover:shadow-xl flex items-center gap-2">
 </button>
 
 <label
-class="group px-8 py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95
-text-white font-semibold rounded-xl text-lg transition-all duration-200
-shadow-md hover:shadow-xl flex items-center gap-2 cursor-pointer">
+  class="group px-8 py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95
+  text-white font-semibold rounded-xl text-lg transition-all duration-200
+  shadow-md hover:shadow-xl flex items-center gap-2 cursor-pointer"
+  onclick="verificarLogin(event)">
 
-Enviar MP3/MP4
+  Enviar MP3/MP4
 
-<input 
-  type="file"
-  id="fileInput"
-  accept="audio/*,video/*"
-  class="hidden"
-  onchange="arquivoSelecionado(event)"
-/>
-
+  <input 
+    type="file"
+    id="fileInput"
+    accept="audio/*,video/*"
+    class="hidden"
+    onchange="arquivoSelecionado(event)"
+  />
 </label>
 
 </div>
