@@ -38,7 +38,7 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 app = Flask(__name__)
 CORS(app)
 
-GROQ_CLIENT = Groq(api_key="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")
+GROQ_CLIENT = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # ── Configuração de armazenamento ─────────────────────────────────────────────
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")  # "local" | "s3" | "gcs"
