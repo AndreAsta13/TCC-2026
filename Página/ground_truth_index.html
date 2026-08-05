@@ -6,286 +6,7 @@
 <title>Ground Truth — Transcreva.IA</title>
 <link rel="icon" type="image/png" href="../Image/image.png" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --emerald: #059669; --emerald-light: #d1fae5; --emerald-dark: #047857;
-    --indigo:  #4f46e5; --indigo-light: #e0e7ff; --indigo-dark:  #3730a3;
-    --amber:   #d97706; --amber-light:  #fef3c7;
-    --red:     #dc2626; --red-light:    #fee2e2;
-    --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb;
-    --gray-400: #9ca3af; --gray-600: #4b5563; --gray-800: #1f2937;
-  }
-
-  body {
-    font-family: 'Inter', sans-serif;
-    background: #f0fdf4;
-    min-height: 100vh;
-    color: var(--gray-800);
-  }
-
-  /* ── grade decorativa ── */
-  body::before {
-    content: '';
-    position: fixed; inset: 0; z-index: -2;
-    background:
-      linear-gradient(to right,  #e5e7eb 1px, transparent 1px),
-      linear-gradient(to bottom, #e5e7eb 1px, transparent 1px);
-    background-size: 40px 40px;
-    opacity: .25;
-  }
-  body::after {
-    content: '';
-    position: fixed; inset: 0; z-index: -1;
-    background:
-      radial-gradient(ellipse 60% 40% at 10% 10%, rgba(167,243,208,.4) 0%, transparent 60%),
-      radial-gradient(ellipse 50% 50% at 90% 20%, rgba(199,210,254,.35) 0%, transparent 60%),
-      radial-gradient(ellipse 70% 50% at 50% 100%, rgba(165,180,252,.25) 0%, transparent 60%);
-  }
-
-  /* ── header ── */
-  header {
-    background: rgba(255,255,255,.85);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--gray-200);
-    position: sticky; top: 0; z-index: 100;
-  }
-  .header-inner {
-    max-width: 1100px; margin: 0 auto;
-    padding: 14px 24px;
-    display: flex; align-items: center; gap: 16px;
-  }
-  .logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-  .logo img { width: 32px; height: 32px; }
-  .logo span { font-size: 20px; font-weight: 800; color: var(--indigo); }
-  .breadcrumb {
-    font-size: 13px; color: var(--gray-400);
-    display: flex; align-items: center; gap: 6px;
-  }
-  .breadcrumb a { color: var(--indigo); text-decoration: none; }
-  .breadcrumb a:hover { text-decoration: underline; }
-  .storage-pill {
-    margin-left: auto;
-    display: flex; align-items: center; gap: 6px;
-    font-size: 12px; font-weight: 600;
-    padding: 5px 12px; border-radius: 99px;
-    background: var(--emerald-light); color: var(--emerald-dark);
-    border: 1px solid #a7f3d0;
-  }
-  .storage-pill .dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--emerald);
-    animation: pulse-dot 2s infinite;
-  }
-  @keyframes pulse-dot {
-    0%,100% { opacity:1; transform:scale(1); }
-    50%      { opacity:.5; transform:scale(1.4); }
-  }
-
-  /* ── layout ── */
-  main { max-width: 1100px; margin: 0 auto; padding: 32px 24px 64px; }
-
-  .page-title {
-    font-size: 28px; font-weight: 800; color: var(--gray-800);
-    margin-bottom: 4px;
-  }
-  .page-sub { font-size: 15px; color: var(--gray-600); margin-bottom: 28px; }
-
-  /* ── métricas ── */
-  .metrics-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 14px; margin-bottom: 28px;
-  }
-  .metric-card {
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: 14px;
-    padding: 16px 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06);
-  }
-  .metric-label { font-size: 11px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
-  .metric-value { font-size: 26px; font-weight: 800; }
-  .metric-sub   { font-size: 11px; color: var(--gray-400); margin-top: 3px; }
-  .green  { color: var(--emerald); }
-  .amber  { color: var(--amber); }
-  .red    { color: var(--red); }
-  .indigo { color: var(--indigo); }
-
-  /* ── card branco ── */
-  .card {
-    background: white;
-    border: 1px solid var(--gray-200);
-    border-radius: 16px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.05);
-    overflow: hidden;
-    margin-bottom: 24px;
-  }
-  .card-header {
-    padding: 18px 22px;
-    border-bottom: 1px solid var(--gray-100);
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    flex-wrap: wrap;
-  }
-  .card-title { font-size: 15px; font-weight: 700; }
-  .card-body  { padding: 22px; }
-
-  /* ── tabs ── */
-  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-  .tab {
-    padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
-    border: 1px solid var(--gray-200); background: transparent;
-    color: var(--gray-600); cursor: pointer; transition: all .15s;
-  }
-  .tab:hover   { background: var(--gray-100); }
-  .tab.active  { background: var(--indigo); color: white; border-color: var(--indigo); }
-
-  /* ── tabela dataset ── */
-  .dataset-table { width: 100%; border-collapse: collapse; }
-  .dataset-table th {
-    font-size: 11px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: .06em; color: var(--gray-400);
-    padding: 10px 14px; text-align: left;
-    border-bottom: 1px solid var(--gray-100);
-    background: var(--gray-50);
-  }
-  .dataset-table td {
-    padding: 12px 14px; font-size: 13px;
-    border-bottom: 1px solid var(--gray-100);
-    color: var(--gray-800);
-  }
-  .dataset-table tr:last-child td { border-bottom: none; }
-  .dataset-table tr:hover td { background: #f0fdf4; }
-
-  .badge {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px; font-weight: 600;
-    padding: 3px 10px; border-radius: 99px;
-  }
-  .badge-green  { background: var(--emerald-light); color: var(--emerald-dark); }
-  .badge-amber  { background: var(--amber-light);   color: var(--amber); }
-  .badge-red    { background: var(--red-light);      color: var(--red); }
-  .badge-indigo { background: var(--indigo-light);   color: var(--indigo-dark); }
-
-  .source-chip {
-    font-size: 11px; padding: 2px 8px; border-radius: 99px;
-    border: 1px solid var(--gray-200); color: var(--gray-600);
-    background: var(--gray-50);
-  }
-
-  /* barra de WER */
-  .wer-cell { display: flex; align-items: center; gap: 8px; }
-  .wer-bar-bg { flex: 1; height: 5px; border-radius: 3px; background: var(--gray-100); overflow: hidden; min-width: 60px; }
-  .wer-bar-fill { height: 100%; border-radius: 3px; transition: width .6s ease; }
-
-  /* ── formulário adicionar ── */
-  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-  @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
-
-  .field-label { font-size: 12px; font-weight: 600; color: var(--gray-600); margin-bottom: 6px; display: block; }
-  .field-hint  { font-size: 11px; color: var(--gray-400); margin-top: 4px; }
-
-  .drop-zone {
-    border: 2px dashed var(--gray-200); border-radius: 12px;
-    padding: 28px; text-align: center; cursor: pointer;
-    transition: border-color .2s, background .2s;
-    color: var(--gray-400); font-size: 13px;
-  }
-  .drop-zone:hover { border-color: var(--indigo); background: var(--indigo-light); color: var(--indigo); }
-  .drop-zone.over  { border-color: var(--emerald); background: var(--emerald-light); }
-  .drop-icon { font-size: 28px; margin-bottom: 8px; }
-
-  textarea.gt-input {
-    width: 100%; min-height: 140px; resize: vertical;
-    border: 1px solid var(--gray-200); border-radius: 10px;
-    padding: 12px; font-size: 13px; font-family: 'Inter', sans-serif;
-    line-height: 1.6; color: var(--gray-800);
-    transition: border-color .15s;
-  }
-  textarea.gt-input:focus { outline: none; border-color: var(--indigo); }
-
-  select.gt-select {
-    width: 100%; padding: 9px 12px; border-radius: 8px;
-    border: 1px solid var(--gray-200); font-size: 13px;
-    font-family: 'Inter', sans-serif; color: var(--gray-800);
-    background: white; cursor: pointer;
-  }
-  select.gt-select:focus { outline: none; border-color: var(--indigo); }
-
-  .btn {
-    padding: 9px 20px; border-radius: 8px; font-size: 13px; font-weight: 600;
-    border: 1px solid transparent; cursor: pointer; transition: all .15s;
-    display: inline-flex; align-items: center; gap: 6px;
-  }
-  .btn-primary { background: var(--indigo); color: white; }
-  .btn-primary:hover { background: var(--indigo-dark); }
-  .btn-outline { background: white; border-color: var(--gray-200); color: var(--gray-800); }
-  .btn-outline:hover { background: var(--gray-100); }
-  .btn-emerald { background: var(--emerald); color: white; }
-  .btn-emerald:hover { background: var(--emerald-dark); }
-
-  /* ── análise WER ── */
-  .wer-formula {
-    background: var(--gray-50); border: 1px solid var(--gray-200);
-    border-radius: 10px; padding: 14px 18px;
-    font-family: monospace; font-size: 14px; color: var(--indigo-dark);
-    margin-bottom: 18px; font-weight: 600;
-  }
-  .wer-legend {
-    display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 10px; margin-bottom: 20px;
-  }
-  .legend-item {
-    background: var(--indigo-light); border-radius: 8px;
-    padding: 10px 12px;
-  }
-  .legend-key   { font-size: 16px; font-weight: 800; color: var(--indigo); }
-  .legend-desc  { font-size: 11px; color: var(--indigo-dark); margin-top: 2px; }
-
-  .wer-row {
-    display: flex; align-items: center; gap: 12px;
-    padding: 10px 0; border-bottom: 1px solid var(--gray-100);
-  }
-  .wer-row:last-child { border-bottom: none; }
-  .wer-filename { font-size: 12px; color: var(--gray-600); width: 200px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  /* ── storage status ── */
-  .storage-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  @media (max-width: 640px) { .storage-grid { grid-template-columns: 1fr; } }
-
-  .storage-card {
-    border: 1.5px solid var(--gray-200); border-radius: 12px;
-    padding: 18px; text-align: center; cursor: pointer;
-    transition: all .2s;
-  }
-  .storage-card:hover   { border-color: var(--indigo); }
-  .storage-card.active  { border-color: var(--emerald); background: #f0fdf4; }
-  .storage-card.active .storage-name { color: var(--emerald-dark); }
-  .storage-logo { font-size: 28px; margin-bottom: 8px; }
-  .storage-name { font-size: 14px; font-weight: 700; color: var(--gray-800); margin-bottom: 4px; }
-  .storage-desc { font-size: 11px; color: var(--gray-400); }
-  .storage-status-label {
-    margin-top: 10px; font-size: 11px; font-weight: 600;
-    padding: 3px 10px; border-radius: 99px; display: inline-block;
-  }
-
-  /* ── feedback toast ── */
-  #toast {
-    position: fixed; bottom: 24px; right: 24px;
-    padding: 12px 20px; border-radius: 10px;
-    font-size: 13px; font-weight: 600; color: white;
-    box-shadow: 0 4px 12px rgba(0,0,0,.15);
-    transform: translateY(80px); opacity: 0;
-    transition: all .3s ease; z-index: 999;
-  }
-  #toast.show { transform: translateY(0); opacity: 1; }
-  #toast.success { background: var(--emerald); }
-  #toast.error   { background: var(--red); }
-
-  .tab-content { display: none; }
-  .tab-content.active { display: block; }
-</style>
+<link rel="stylesheet" href="../css/ground.css">
 </head>
 <body>
 
@@ -303,15 +24,102 @@
       <span>/</span>
       <span>Ground Truth</span>
     </div>
-    <div class="storage-pill" id="storageStatus">
-      <div class="dot"></div>
-      <span id="storageLabel">verificando...</span>
-    </div>
+    <div class="menu-dropdown" id="menuDropdown">
+  <a href="#" class="btn_menu" id="menuBtn">
+    <span>Menu</span>
+    <span class="menu-caret">▾</span>
+  </a>
+  <div class="menu-panel" id="menuPanel">
+    <a href="../index.html" class="menu-item">🏠 Início</a>
+    <a href="ground_truth.html" class="menu-item">📋 Ground Truth</a>
+    <a href="#" class="menu-item">📊 Meus arquivos</a>
+    <a href="#" class="menu-item">⚙️ Configurações</a>
+  </div>
+</div>
   </div>
 </header>
 
-<main>
-  <h1 class="page-title">Dataset de Ground Truth</h1>
+<main class="slides" id="slides">
+  <section class="hero-section" id="heroSection">
+    <h1 class="hero-title">Seja bem-vindo ao Transcreva.IA</h1>
+ 
+<p class="hero-sub">Inicie a gravação, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição.</p>
+ 
+<div class="control-bar">
+ 
+
+ 
+<button onclick="abrirYoutube()" class="btn-secondary" type="button">
+  <span class="btn-icon">▶</span> Link do YouTube
+</button>
+ 
+<label class="btn-secondary btn-upload">
+  <span class="btn-icon">⬆</span> Enviar MP3/MP4 
+  <input
+    type="file"
+    id="fileInput"
+    accept="audio/*,video/*"
+    class="hidden-input"
+    onchange="arquivoSelecionado(event)"
+  />
+</label>
+ 
+</div>
+ 
+</section>
+<section class="transcription-section" id="transcriptionSection">
+
+  <h2 class="hero-title">Converta áudio de aulas, reuniões e palestras em texto com IA</h2>
+  <p class="hero-sub">Inicie a gravação, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição.</p>
+
+  <div class="control-bar">
+    <button id="startBtn" class="btn-record" type="button">
+      <span id="micIcon" class="rec-icon">🎤</span>
+      Iniciar gravação
+    </button>
+
+    <button id="stopBtn" class="btn-stop" type="button">
+      <span class="rec-icon">⏹</span>
+      Parar gravação
+    </button>
+  </div>
+<div class="steps-grid">
+    <div>
+     
+      <h4 class="step-title">Faça sua transcrição</h4>
+      <p class="step-desc">Inicie a gravação, se não estiver usando clique em parar a gravação.</p>
+    </div>
+    <div>
+      
+      <h4 class="step-title">IA processa</h4>
+      <p class="step-desc">O sistema converte fala em texto automaticamente.</p>
+    </div>
+    <div>
+      <h4 class="step-title">Receba o texto</h4>
+      <p class="step-desc">Transcrição clara para aulas e reuniões.</p>
+    </div>
+  </div>
+  <div class="transcript-card">
+    <div class="transcript-header">
+      <h3 class="transcript-title">Transcrição em tempo real</h3>
+      <span id="status" class="status-badge">Aguardando</span>
+    </div>
+
+    <div id="transcript" class="transcript-box">
+      O texto transcrito aparecerá aqui...
+    </div>
+
+    <div class="transcript-footer">
+      <button id="downloadBtn" class="btn-download">Baixar transcrição</button>
+    </div>
+  </div>
+
+</section>
+ 
+
+<section class="dataset-section" id="datasetSection">
+
+  <h2 class="page-title">Dataset de Ground Truth</h2>
   <p class="page-sub">Conjunto de validação para medição de acurácia (WER/CER) do Transcreva.IA</p>
 
   <!-- métricas -->
@@ -347,11 +155,13 @@
       <div class="metric-sub">prontos para teste</div>
     </div>
   </div>
-
+</section>
+<section class="tabs-section" id="tabsSection">
   <!-- tabs -->
   <div class="card">
     <div class="card-header">
       <div class="tabs">
+        
         <button class="tab active" onclick="showTab('dataset', this)">📋 Dataset</button>
         <button class="tab" onclick="showTab('wer', this)">📊 Análise WER</button>
         <button class="tab" onclick="showTab('adicionar', this)">➕ Adicionar áudio</button>
@@ -509,259 +319,17 @@ GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/credenciais.json</pre>
       </div>
     </div>
   </div>
+</section>
 </main>
+<nav class="slide-nav" id="slideNav">
+  <button class="slide-dot active" data-slide="0" aria-label="Início"></button>
+  <button class="slide-dot" data-slide="1" aria-label="Dataset"></button>
+  <button class="slide-dot" data-slide="2" aria-label="Análises"></button>
+</nav>
+<button class="slide-arrow slide-prev" id="slidePrev" aria-label="Seção anterior">‹</button>
+<button class="slide-arrow slide-next" id="slideNext" aria-label="Próxima seção">›</button>
 
-<script>
-const API = 'http://localhost:5000';
 
-/* ══ Tabs ══════════════════════════════════════════════════════════════════ */
-function showTab(id, btn) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + id).classList.add('active');
-  btn.classList.add('active');
-  if (id === 'wer') renderWerChart();
-}
-
-/* ══ Toast ══════════════════════════════════════════════════════════════════ */
-function toast(msg, tipo = 'success') {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'show ' + tipo;
-  setTimeout(() => { t.className = ''; }, 3200);
-}
-
-/* ══ Cores WER ══════════════════════════════════════════════════════════════ */
-function werColor(v) {
-  if (v === null || v === undefined) return 'var(--gray-400)';
-  if (v < 7)  return 'var(--emerald)';
-  if (v < 12) return 'var(--amber)';
-  return 'var(--red)';
-}
-function werBadge(v) {
-  if (v === null || v === undefined) return '<span class="badge badge-indigo">pendente</span>';
-  const cls = v < 7 ? 'badge-green' : v < 12 ? 'badge-amber' : 'badge-red';
-  return `<span class="badge ${cls}">${v.toFixed(1)}%</span>`;
-}
-function statusBadge(s) {
-  const map = {
-    validado: 'badge-green',
-    revisão:  'badge-amber',
-    pendente: 'badge-indigo',
-  };
-  return `<span class="badge ${map[s] || 'badge-indigo'}">${s}</span>`;
-}
-function storageBadge(s) {
-  const icons = { local:'💾', s3:'🪣', gcs:'☁️' };
-  return `<span class="source-chip">${icons[s] || ''} ${s || 'local'}</span>`;
-}
-
-/* ══ Carregar dados ════════════════════════════════════════════════════════ */
-let datasetCache = [];
-
-async function carregarDados() {
-  try {
-    const [resumo, lista] = await Promise.all([
-      fetch(`${API}/gt/resumo`).then(r => r.json()),
-      fetch(`${API}/gt/listar`).then(r => r.json()),
-    ]);
-    datasetCache = lista;
-    atualizarMetricas(resumo);
-    renderDataset(lista);
-    if (document.getElementById('tab-wer').classList.contains('active')) renderWerChart();
-  } catch {
-    renderDataset([]);
-    // servidor offline — usa dados demo
-    usarDadosDemo();
-  }
-}
-
-function usarDadosDemo() {
-  datasetCache = [
-    { id:'a1', filename:'entrevista_cv_01.mp3',  fonte:'Common Voice',      palavras_gt:312, wer:5.2,  cer:2.1, storage:'s3',   status:'validado' },
-    { id:'a2', filename:'palestra_ia_02.wav',     fonte:'YouTube',           palavras_gt:604, wer:11.7, cer:5.3, storage:'s3',   status:'validado' },
-    { id:'a3', filename:'reuniao_03.m4a',         fonte:'Gravação própria',  palavras_gt:781, wer:7.9,  cer:3.4, storage:'local',status:'validado' },
-    { id:'a4', filename:'aula_usp_04.mp3',        fonte:'Podcast Acadêmico', palavras_gt:556, wer:4.1,  cer:1.8, storage:'gcs',  status:'validado' },
-    { id:'a5', filename:'seminario_05.wav',       fonte:'Common Voice',      palavras_gt:344, wer:9.3,  cer:4.1, storage:'s3',   status:'revisão'  },
-    { id:'a6', filename:'debate_tecnico_06.mp3',  fonte:'Podcast Acadêmico', palavras_gt:499, wer:13.8, cer:6.2, storage:'local',status:'revisão'  },
-    { id:'a7', filename:'conferencia_07.m4a',     fonte:'YouTube',           palavras_gt:751, wer:6.6,  cer:2.9, storage:'gcs',  status:'validado' },
-  ];
-  const wers = datasetCache.map(d => d.wer);
-  atualizarMetricas({
-    total: datasetCache.length,
-    validados: 5, pendentes: 0,
-    wer_medio: (wers.reduce((a,b)=>a+b,0)/wers.length).toFixed(2),
-    wer_melhor: Math.min(...wers).toFixed(2),
-    wer_pior:   Math.max(...wers).toFixed(2),
-    palavras_total: datasetCache.reduce((a,d)=>a+d.palavras_gt,0),
-    storage_backend: 'demo',
-  });
-  renderDataset(datasetCache);
-}
-
-function atualizarMetricas(r) {
-  document.getElementById('m-total').textContent = r.total ?? '—';
-  const wmEl = document.getElementById('m-wer');
-  wmEl.textContent = r.wer_medio != null ? r.wer_medio + '%' : '—';
-  wmEl.className = 'metric-value ' + (r.wer_medio < 7 ? 'green' : r.wer_medio < 12 ? 'amber' : 'red');
-  const wbEl = document.getElementById('m-best');
-  wbEl.textContent = r.wer_melhor != null ? r.wer_melhor + '%' : '—';
-  const wwEl = document.getElementById('m-worst');
-  wwEl.textContent = r.wer_pior != null ? r.wer_pior + '%' : '—';
-  wwEl.className = 'metric-value ' + (r.wer_pior >= 12 ? 'red' : 'amber');
-  document.getElementById('m-words').textContent = (r.palavras_total ?? 0).toLocaleString('pt-BR');
-  document.getElementById('m-valid').textContent = r.validados ?? '—';
-
-  const label = document.getElementById('storageLabel');
-  const pill  = document.getElementById('storageStatus');
-  const be    = r.storage_backend || 'local';
-  label.textContent = be.toUpperCase();
-  if (be === 'demo') {
-    pill.style.background = '#fef3c7'; pill.style.color = '#92400e';
-    pill.style.borderColor = '#fcd34d';
-  }
-  document.querySelectorAll('.storage-card').forEach(c => c.classList.remove('active'));
-  const sc = document.getElementById('card-' + be);
-  if (sc) sc.classList.add('active');
-}
-
-function renderDataset(lista) {
-  const tbody = document.getElementById('datasetBody');
-  if (!lista.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:32px;">Nenhum arquivo no dataset ainda.</td></tr>';
-    return;
-  }
-  const maxWer = Math.max(...lista.map(d => d.wer || 0), 1);
-  tbody.innerHTML = lista.map((d, i) => `
-    <tr>
-      <td style="color:var(--gray-400); font-size:12px;">${i + 1}</td>
-      <td style="font-weight:500; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${d.filename}">${d.filename}</td>
-      <td><span class="source-chip">${d.fonte || '—'}</span></td>
-      <td>${(d.palavras_gt || 0).toLocaleString('pt-BR')}</td>
-      <td>
-        <div class="wer-cell">
-          <span style="font-weight:700; color:${werColor(d.wer)}; min-width:40px; font-size:13px;">${d.wer != null ? d.wer.toFixed(1)+'%' : '—'}</span>
-          <div class="wer-bar-bg">
-            <div class="wer-bar-fill" style="width:${d.wer != null ? Math.min((d.wer/maxWer)*100,100).toFixed(1) : 0}%; background:${werColor(d.wer)};"></div>
-          </div>
-        </div>
-      </td>
-      <td style="color:var(--gray-600);">${d.cer != null ? d.cer.toFixed(1)+'%' : '—'}</td>
-      <td>${storageBadge(d.storage)}</td>
-      <td>${statusBadge(d.status)}</td>
-    </tr>
-  `).join('');
-}
-
-/* ══ WER Chart ════════════════════════════════════════════════════════════ */
-function renderWerChart() {
-  const el = document.getElementById('werChart');
-  if (!datasetCache.length) { el.innerHTML = '<p style="color:var(--gray-400);text-align:center;">Nenhum dado disponível.</p>'; return; }
-  const max = Math.max(...datasetCache.map(d => d.wer || 0), 1);
-  el.innerHTML = datasetCache.map(d => `
-    <div class="wer-row">
-      <div class="wer-filename" title="${d.filename}">${d.filename}</div>
-      <div class="wer-bar-bg" style="flex:1;">
-        <div class="wer-bar-fill" style="width:${d.wer != null ? ((d.wer/max)*100).toFixed(1) : 0}%; background:${werColor(d.wer)};"></div>
-      </div>
-      <span style="font-size:13px;font-weight:700;color:${werColor(d.wer)};min-width:44px;text-align:right;">${d.wer != null ? d.wer.toFixed(1)+'%' : '—'}</span>
-      <span style="font-size:11px;color:var(--gray-400);min-width:80px;text-align:right;">CER: ${d.cer != null ? d.cer.toFixed(1)+'%' : '—'}</span>
-    </div>
-  `).join('');
-}
-
-/* ══ Drop zone ════════════════════════════════════════════════════════════ */
-let arquivoSelecionado = null;
-
-const dz = document.getElementById('dropZone');
-dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
-dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-dz.addEventListener('drop', e => {
-  e.preventDefault(); dz.classList.remove('over');
-  const f = e.dataTransfer.files[0];
-  if (f) definirArquivo(f);
-});
-
-function arquivoEscolhido(input) {
-  if (input.files[0]) definirArquivo(input.files[0]);
-}
-function definirArquivo(f) {
-  arquivoSelecionado = f;
-  document.getElementById('dropText').textContent = '✔ ' + f.name;
-  dz.style.borderColor = 'var(--emerald)';
-  dz.style.background  = 'var(--emerald-light)';
-  dz.style.color       = 'var(--emerald-dark)';
-}
-
-/* ── contador de palavras ── */
-document.getElementById('gtTextarea').addEventListener('input', function() {
-  const n = this.value.trim().split(/\s+/).filter(Boolean).length;
-  document.getElementById('wordCount').textContent = n.toLocaleString('pt-BR');
-});
-
-/* ══ Enviar para servidor ═════════════════════════════════════════════════ */
-async function enviarParaServidor() {
-  const gt    = document.getElementById('gtTextarea').value.trim();
-  const fonte = document.getElementById('fonteSelect').value;
-  if (!arquivoSelecionado) { toast('Selecione um arquivo de áudio.', 'error'); return; }
-  if (!gt)    { toast('Digite a transcrição ground truth.', 'error'); return; }
-  if (!fonte) { toast('Selecione a fonte do áudio.', 'error'); return; }
-
-  const form = new FormData();
-  form.append('file', arquivoSelecionado);
-  form.append('transcricao', gt);
-  form.append('fonte', fonte);
-
-  const prog  = document.getElementById('uploadProgress');
-  const pBar  = document.getElementById('progressBar');
-  const pText = document.getElementById('progressText');
-  prog.style.display = 'block';
-  pBar.style.width   = '30%';
-  pText.textContent  = 'Enviando arquivo...';
-
-  try {
-    const res = await fetch(`${API}/gt/adicionar`, { method: 'POST', body: form });
-    pBar.style.width = '80%';
-    pText.textContent = 'Transcrevendo e calculando WER...';
-    const data = await res.json();
-    pBar.style.width = '100%';
-
-    if (data.sucesso) {
-      toast(`Adicionado! WER: ${data.entrada.wer != null ? data.entrada.wer + '%' : 'pendente'}`, 'success');
-      limparFormulario();
-      await carregarDados();
-    } else {
-      toast(data.erro || 'Erro ao adicionar.', 'error');
-    }
-  } catch {
-    toast('Servidor offline. Verifique se ground_truth_server.py está rodando.', 'error');
-  } finally {
-    setTimeout(() => { prog.style.display = 'none'; pBar.style.width = '0%'; }, 1200);
-  }
-}
-
-function limparFormulario() {
-  arquivoSelecionado = null;
-  document.getElementById('gtTextarea').value   = '';
-  document.getElementById('fonteSelect').value  = '';
-  document.getElementById('audioInput').value   = '';
-  document.getElementById('dropText').textContent = 'Clique ou arraste o arquivo aqui';
-  document.getElementById('wordCount').textContent = '0';
-  dz.style.borderColor = ''; dz.style.background = ''; dz.style.color = '';
-}
-
-/* ══ Exportar JSON ════════════════════════════════════════════════════════ */
-function exportarDataset() {
-  const blob = new Blob([JSON.stringify(datasetCache, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `ground_truth_${new Date().toISOString().slice(0,10)}.json`;
-  a.click();
-  toast('Dataset exportado!', 'success');
-}
-
-/* ══ Init ═════════════════════════════════════════════════════════════════ */
-carregarDados();
-</script>
+<script src="../js/ground.js"></script>
 </body>
 </html>

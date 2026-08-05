@@ -59,10 +59,7 @@ Transcreva.IA
   class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
   Login
   </a>
-  <a href="cadastro/cadastro.html"
-  class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
-  Cadastro
-  </a>
+  
   <a href="Sobre_Nos/index.html"
   class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
   Conheça a Equipe
@@ -84,49 +81,34 @@ Inicie a gravação, cole um link do YouTube ou envie um arquivo MP3/MP4 para ge
 
 <div class="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
 
-<button id="startBtn"
-class="group px-8 py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95
-text-white font-semibold rounded-xl text-lg transition-all duration-200
-shadow-md hover:shadow-xl flex items-center gap-2">
+  <button id="startBtn"
+    class="group px-8 py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95
+    text-white font-semibold rounded-xl text-lg transition-all duration-200
+    shadow-md hover:shadow-xl flex items-center gap-2">
+    <span id="micIcon">🎤</span>
+    Iniciar gravação
+  </button>
 
-<span id="micIcon">🎤</span>
-Iniciar gravação
+  <button id="stopBtn"
+    class="group px-8 py-4 bg-red-600 hover:bg-red-700 active:scale-95
+    text-white font-semibold rounded-xl text-lg transition-all duration-200
+    shadow-md hover:shadow-xl flex items-center gap-2">
+    ⏹ Parar gravação
+  </button>
 
-<button id="stopBtn"
-class="group px-8 py-4 bg-orange-600 hover:bg-orange-700 active:scale-95
-text-white font-semibold rounded-xl text-lg transition-all duration-200
-shadow-md hover:shadow-xl flex items-center gap-2"
-style="background-color: orange;">
+  <a href="cadastro/login.html"
+    class="group px-8 py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95
+    text-white font-semibold rounded-xl text-lg transition-all duration-200
+    shadow-md hover:shadow-xl flex items-center gap-2">
+    ▶ Link YouTube
+  </a>
 
-⏹ Parar gravação
-
-</button>
-
-<button onclick="abrirYoutube()"
-class="group px-8 py-4 bg-red-600 hover:bg-red-700 active:scale-95
-text-white font-semibold rounded-xl text-lg transition-all duration-200
-shadow-md hover:shadow-xl flex items-center gap-2">
-
-▶ Link YouTube
-
-</button>
-
-<label
-  class="group px-8 py-4 bg-indigo-600 hover:bg-indigo-700 active:scale-95
-  text-white font-semibold rounded-xl text-lg transition-all duration-200
-  shadow-md hover:shadow-xl flex items-center gap-2 cursor-pointer"
-  onclick="verificarLogin(event)">
-
-  Enviar MP3/MP4
-
-  <input 
-    type="file"
-    id="fileInput"
-    accept="audio/*,video/*"
-    class="hidden"
-    onchange="arquivoSelecionado(event)"
-  />
-</label>
+  <a href="cadastro/login.html"
+    class="group px-8 py-4 bg-white border-2 border-gray-300 text-indigo-700
+    font-semibold rounded-xl text-lg transition-all duration-200
+    shadow-md hover:shadow-xl active:scale-95 flex items-center gap-2">
+    📤 Enviar MP3/MP4
+  </a>
 
 </div>
 
