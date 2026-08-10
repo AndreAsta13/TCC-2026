@@ -4,64 +4,122 @@ const cors = require("cors");
 const bcrypt = require("bcrypt");
 
 const app = express();
+
 app.use(express.json());
 app.use(cors());
-
-// 🔗 CONEXÃO COM POSTGRESQL
+// CONEXÃO COM POSTGRESQL
 const pool = new Pool({
-  user: "postgres",
-  host: "localhost",
-  database: "tcc",
-  password: "1234", 
-  port: 5432,
+    user: "postgres",
+    host: "localhost",
+    database: "tcc",
+    password: "1234",
+    port: 5432,
 });
 
-// 📌 CADASTRO
+
+// TESTE DO BANCO
+app.get("/teste-db", async (req, res) => {
+    try {
+        const resultado = await pool.query("SELECT NOW()");
+
+        res.json({
+            sucesso: true,
+            mensagem: "PostgreSQL conectado!",
+            horario: resultado.rows[0]
+        });
+
+    } catch (err) {
+        console.error("ERRO NO BANCO:", err);
+
+        res.status(500).json({
+            sucesso: false,
+            erro: err.message
+        });
+    }
+});
+
+
+// CADASTRO
 app.post("/cadastro", async (req, res) => {
-  const { nome, email, senha } = req.body;
+    const { nome, email, senha } = req.body;
 
-  console.log("Recebido:", nome, email, senha); 
+    console.log("Recebido:", nome, email);
 
-  try {
-    const hash = await bcrypt.hash(senha, 10);
+    try {
 
-    await pool.query(
-      "INSERT INTO usuarios (nome, email, senha) VALUES ($1, $2, $3)",
-      [nome, email, hash]
-    );
+        const hash = await bcrypt.hash(senha, 10);
 
-    res.json({ sucesso: true });
-  } catch (err) {
-  console.log("ERRO REAL:", err); // 👈 MOSTRA O ERRO VERDADEIRO
-  res.json({ erro: err.message }); // 👈 MOSTRA NO FRONT
-}
+        await pool.query(
+            "INSERT INTO usuarios (nome, email, senha) VALUES ($1, $2, $3)",
+            [nome, email, hash]
+        );
+
+        res.json({
+            sucesso: true
+        });
+
+    } catch (err) {
+
+        console.log("ERRO REAL:", err);
+
+        res.status(500).json({
+            erro: err.message
+        });
+    }
 });
 
-// 📌 LOGIN
+
+// LOGIN
 app.post("/login", async (req, res) => {
-  const { email, senha } = req.body;
+    const { email, senha } = req.body;
 
-  const result = await pool.query(
-    "SELECT * FROM usuarios WHERE email = $1",
-    [email]
-  );
+    try {
 
-  if (result.rows.length === 0) {
-    return res.json({ erro: "Usuário não encontrado" });
-  }
+        const result = await pool.query(
+            "SELECT * FROM usuarios WHERE email = $1",
+            [email]
+        );
 
-  const user = result.rows[0];
+        if (result.rows.length === 0) {
+            return res.json({
+                erro: "Usuário não encontrado"
+            });
+        }
 
-  const valido = await bcrypt.compare(senha, user.senha);
+        const user = result.rows[0];
 
-  if (!valido) {
-    return res.json({ erro: "Senha incorreta" });
-  }
+        const valido = await bcrypt.compare(
+            senha,
+            user.senha
+        );
 
-  res.json({ sucesso: true });
+        if (!valido) {
+            return res.json({
+                erro: "Senha incorreta"
+            });
+        }
+
+        res.json({
+            sucesso: true,
+            usuario: {
+                id: user.id,
+                nome: user.nome,
+                email: user.email
+            }
+        });
+
+    } catch (err) {
+
+        console.error("ERRO NO LOGIN:", err);
+
+        res.status(500).json({
+            erro: "Erro interno do servidor"
+        });
+    }
 });
 
-// 🚀 INICIAR SERVIDOR
+
+// INICIAR SERVIDOR
 app.listen(3000, () => {
-  console.log("Servidor rodando em http://localhost:3000");
+    console.log("Servidor rodando em http://localhost:3000");
 });
