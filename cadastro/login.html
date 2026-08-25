@@ -74,7 +74,7 @@ document.getElementById("formLogin").addEventListener("submit", async (e) => {
 
 if (data.sucesso) {
   localStorage.setItem("user", email);
-  window.location.href = "../Dashboard.html"; // 👈 REDIRECIONA
+  window.location.href = "/Página/ground_truth_index.html"; // 👈 REDIRECIONA
 } else {
   alert(data.erro);
 }

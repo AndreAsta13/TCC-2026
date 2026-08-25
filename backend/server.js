@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const { Pool } = require("pg");
 const cors = require("cors");
@@ -7,16 +9,12 @@ const app = express();
 
 app.use(express.json());
 app.use(cors());
-// CONEXÃO COM POSTGRESQL
+
+console.log("DATABASE_URL carregada:", !!process.env.DATABASE_URL);
+
 const pool = new Pool({
-    user: "postgres",
-    host: "localhost",
-    database: "tcc",
-    password: "1234",
-    port: 5432,
+    connectionString: process.env.DATABASE_URL
 });
-
-
 // TESTE DO BANCO
 app.get("/teste-db", async (req, res) => {
     try {
@@ -120,6 +118,8 @@ app.post("/login", async (req, res) => {
 
 
 // INICIAR SERVIDOR
-app.listen(3000, () => {
-    console.log("Servidor rodando em http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
