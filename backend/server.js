@@ -4,6 +4,7 @@ const express = require("express");
 const { Pool } = require("pg");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 
@@ -15,6 +16,30 @@ console.log("DATABASE_URL carregada:", !!process.env.DATABASE_URL);
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL
 });
+
+function autenticarToken(req, res, next) {
+    const authHeader = req.headers["authorization"];
+
+    const token = authHeader && authHeader.split(" ")[1];
+
+    if (!token) {
+        return res.status(401).json({
+            erro: "Token não fornecido"
+        });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, usuario) => {
+        if (err) {
+            return res.status(403).json({
+                erro: "Token inválido ou expirado"
+            });
+        }
+
+        req.usuario = usuario;
+
+        next();
+    });
+}
 // TESTE DO BANCO
 app.get("/teste-db", async (req, res) => {
     try {
@@ -97,8 +122,22 @@ app.post("/login", async (req, res) => {
             });
         }
 
+        // CRIA O TOKEN
+        const token = jwt.sign(
+            {
+                userId: user.id
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: "2h"
+            }
+        );
+
         res.json({
             sucesso: true,
+
+            token: token,
+
             usuario: {
                 id: user.id,
                 nome: user.nome,

@@ -1,1 +1,2 @@
-DATABASE_URL = postgresql://neondb_owner:npg_rU8Gnd0ghPNL@ep-little-queen-acwtefqj-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+DATABASE_URL=postgresql://neondb_owner:npg_rU8Gnd0ghPNL@ep-little-queen-acwtefqj-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+JWT_SECRET= jwtsecret00246
