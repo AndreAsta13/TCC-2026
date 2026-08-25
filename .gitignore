@@ -3,3 +3,6 @@ output.css
 .env
 chave.env
 .env.example
+venv/
+.venv/
+__pycache__/
