@@ -1,4 +1,4 @@
-const API = 'http://localhost:5000';
+const API = 'http://localhost:3000';
 
 /* ══════════════════════════════════════════════════════════════════════════
    Variáveis globais que serão preenchidas quando o DOM estiver pronto

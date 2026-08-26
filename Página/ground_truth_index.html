@@ -8,6 +8,53 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../css/ground.css">
 </head>
+
+<script>
+async function carregarUsuario() {
+
+    const token = localStorage.getItem("token");
+
+    // Se não existe token, volta para o login
+    if (!token) {
+        window.location.href = "login.html";
+        return;
+    }
+
+    try {
+
+        const resposta = await fetch("http://localhost:3000/me", {
+            method: "GET",
+            headers: {
+                "Authorization": "Bearer " + token
+            }
+        });
+
+        const data = await resposta.json();
+
+        if (!resposta.ok || !data.sucesso) {
+            localStorage.removeItem("token");
+            localStorage.removeItem("usuario");
+
+            window.location.href = "login.html";
+            return;
+        }
+
+        console.log("Usuário logado:", data.usuario);
+
+        // Mostra o nome do usuário no console
+        console.log("Nome:", data.usuario.nome);
+        console.log("Email:", data.usuario.email);
+
+    } catch (erro) {
+
+        console.error("Erro ao buscar usuário:", erro);
+
+    }
+}
+
+carregarUsuario();
+</script>
+
 <body>
 
 <div id="toast"></div>

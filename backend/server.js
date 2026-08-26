@@ -155,7 +155,102 @@ app.post("/login", async (req, res) => {
     }
 });
 
+// SALVAR METADADOS DO USUÁRIO
+app.post("/metadados", autenticarToken, async (req, res) => {
 
+    const { titulo, descricao } = req.body;
+
+    const usuarioId = req.usuario.userId;
+
+    try {
+
+        const resultado = await pool.query(
+            `INSERT INTO metadados
+            (usuario_id, titulo, descricao)
+            VALUES ($1, $2, $3)
+            RETURNING *`,
+            [usuarioId, titulo, descricao]
+        );
+
+        res.json({
+            sucesso: true,
+            metadado: resultado.rows[0]
+        });
+
+    } catch (err) {
+
+        console.error("ERRO AO SALVAR METADADOS:", err);
+
+        res.status(500).json({
+            sucesso: false,
+            erro: "Erro ao salvar os dados"
+        });
+    }
+});
+// BUSCAR METADADOS DO USUÁRIO LOGADO
+app.get("/metadados", autenticarToken, async (req, res) => {
+
+    const usuarioId = req.usuario.userId;
+
+    try {
+
+        const resultado = await pool.query(
+            `SELECT *
+             FROM metadados
+             WHERE usuario_id = $1
+             ORDER BY criado_em DESC`,
+            [usuarioId]
+        );
+
+        res.json({
+            sucesso: true,
+            metadados: resultado.rows
+        });
+
+    } catch (err) {
+
+        console.error("ERRO AO BUSCAR METADADOS:", err);
+
+        res.status(500).json({
+            sucesso: false,
+            erro: "Erro ao buscar os dados"
+        });
+    }
+});
+// DADOS DO USUÁRIO LOGADO
+app.get("/me", autenticarToken, async (req, res) => {
+
+    const usuarioId = req.usuario.userId;
+
+    try {
+
+        const resultado = await pool.query(
+            `SELECT id, nome, email
+             FROM usuarios
+             WHERE id = $1`,
+            [usuarioId]
+        );
+
+        if (resultado.rows.length === 0) {
+            return res.status(404).json({
+                erro: "Usuário não encontrado"
+            });
+        }
+
+        res.json({
+            sucesso: true,
+            usuario: resultado.rows[0]
+        });
+
+    } catch (err) {
+
+        console.error("ERRO AO BUSCAR USUÁRIO:", err);
+
+        res.status(500).json({
+            erro: "Erro interno do servidor"
+        });
+    }
+});
 // INICIAR SERVIDOR
 const PORT = process.env.PORT || 3000;
 
