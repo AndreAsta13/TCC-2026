@@ -8,6 +8,9 @@ import os, tempfile, shutil, json
 import numpy as np
 import soundfile as sf
 from pyannote.audio import Pipeline as PyannotePipeline
+import difflib
+import requests
+CACHE_NOMES_PATH = "cache_nomes_ibge.json"
 
 load_dotenv()
 
