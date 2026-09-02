@@ -51,20 +51,42 @@ function storageBadge(s) {
 
 /* ══ Carregar dados ════════════════════════════════════════════════════════ */
 async function carregarDados() {
-  if (!document.getElementById('datasetBody')) return;
+  const token = localStorage.getItem("token");
+
+  if (!token) {
+    console.error("Token de autenticação não encontrado.");
+    return;
+  }
+
   try {
-    const [resumo, lista] = await Promise.all([
-      fetch(`${API}/gt/resumo`).then(r => r.json()),
-      fetch(`${API}/gt/listar`).then(r => r.json()),
-    ]);
-    datasetCache = lista;
-    atualizarMetricas(resumo);
-    renderDataset(lista);
-    const werTab = document.getElementById('tab-wer');
-    if (werTab && werTab.classList.contains('active')) renderWerChart();
-  } catch {
-    renderDataset([]);
-    usarDadosDemo();
+    // 1. Busca o resumo incluindo o token
+    const resResumo = await fetch("http://localhost:3000/gt/resumo", {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    });
+
+    // 2. Busca a lista incluindo o token
+    const resListar = await fetch("http://localhost:3000/gt/listar", {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    });
+
+    if (resResumo.ok && resListar.ok) {
+      const resumo = await resResumo.json();
+      const lista = await resListar.json();
+
+      // Continue o seu código utilizando 'resumo' e 'lista'
+      console.log("Resumo:", resumo);
+      console.log("Lista:", lista);
+    } else {
+      console.error("Erro na resposta do servidor:", resResumo.status, resListar.status);
+    }
+  } catch (erro) {
+    console.error("Erro ao carregar dados do Ground Truth:", erro);
   }
 }
 
