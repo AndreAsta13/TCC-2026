@@ -51,6 +51,65 @@ async function carregarUsuario() {
 
     }
 }
+document.addEventListener("DOMContentLoaded", async () => {
+  // 1. Pega o token salvo no navegador
+  const token = localStorage.getItem("token");
+
+  // 2. Se o usuário tentar acessar a tela diretamente sem fazer login, redireciona de volta
+  if (!token) {
+    alert("Você precisa estar logado para acessar esta página.");
+    window.location.href = "cadastro/login.html";
+    return;
+  }
+
+  // 3. Busca os arquivos do usuário logado na rota do backend
+  try {
+    const resposta = await fetch("http://localhost:3000/metadados", {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${token}` // Identifica o usuário logado
+      }
+    });
+
+    const dados = await resposta.json();
+
+    if (dados.sucesso) {
+      // 4. Exibe os arquivos e dados de transcrição na tela
+      carregarArquivosNaTela(dados.metadados);
+    } else {
+      // Caso o token seja inválido ou expirado
+      alert("Sessão expirada. Faça login novamente.");
+      localStorage.removeItem("token");
+      window.location.href = "cadastro/login.html";
+    }
+  } catch (erro) {
+    console.error("Erro ao carregar os dados:", erro);
+  }
+});
+
+// Função para inserir os dados no HTML da página ground_truth
+function carregarArquivosNaTela(arquivos) {
+  // Substitua 'container-arquivos' pelo ID do elemento HTML onde você exibe as transcrições
+  const container = document.getElementById("container-arquivos");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  if (arquivos.length === 0) {
+    container.innerHTML = "<p>Nenhum arquivo ou transcrição encontrada.</p>";
+    return;
+  }
+
+  arquivos.forEach(item => {
+    container.innerHTML += `
+      <div class="item-transcricao">
+        <h3>${item.titulo}</h3>
+        <p>${item.descricao}</p>
+        <small>Criado em: ${new Date(item.criado_em).toLocaleDateString()}</small>
+      </div>
+    `;
+  });
+}
 
 carregarUsuario();
 </script>
