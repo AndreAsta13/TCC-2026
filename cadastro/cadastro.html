@@ -55,8 +55,13 @@ Já tem conta?
 Fazer login
 </a>
 </p>
+<!-- Painel de notificação -->
+<div id="painelAviso" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 hidden px-8 py-6 rounded-2xl shadow-xl text-white font-semibold text-lg text-center transition-all duration-200 z-50">
+  <span id="painelTexto"></span>
+</div>
 
 </div>
+
 </main>
 
 <script>
@@ -67,18 +72,43 @@ document.getElementById("formCadastro").addEventListener("submit", async (e) => 
   const email = document.getElementById("email").value;
   const senha = document.getElementById("senha").value;
 
-  const res = await fetch("http://localhost:3000/cadastro", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ nome, email, senha }),
-  });
+  try {
+    const res = await fetch("http://localhost:3000/cadastro", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome, email, senha }),
+    });
 
-  const data = await res.json();
+    const data = await res.json();
 
-  alert(data.sucesso ? "Cadastro realizado!" : data.erro);
+    if (data.sucesso) {
+      mostrarAviso("Cadastro realizado com sucesso!", "sucesso");
+      document.getElementById("formCadastro").reset();
+    } else {
+      mostrarAviso(data.erro || "Erro ao cadastrar.", "erro");
+    }
+  } catch (err) {
+    console.error("Erro no cadastro:", err);
+    mostrarAviso("Erro ao conectar com o servidor.", "erro");
+  }
 });
+
+function mostrarAviso(mensagem, tipo = "sucesso") {
+  const painel = document.getElementById("painelAviso");
+  const texto = document.getElementById("painelTexto");
+
+  texto.textContent = mensagem;
+
+  // reseta classes de cor antes de aplicar a nova
+  painel.classList.remove("bg-emerald-600", "bg-red-600", "hidden");
+  painel.classList.add(tipo === "sucesso" ? "bg-emerald-600" : "bg-red-600");
+
+  // some sozinho depois de 4 segundos
+  clearTimeout(painel._timeout);
+  painel._timeout = setTimeout(() => {
+    painel.classList.add("hidden");
+  }, 4000);
+}
 </script>
 
 </body>

@@ -56,62 +56,46 @@ Entrar
 </main>
 
 <script>
-document.getElementById("formLogin").addEventListener("submit", async (e) => {
-  e.preventDefault();
+document.getElementById('formLogin').addEventListener('submit', function (e) {
+  e.preventDefault(); // impede o recarregamento padrão da página
 
-  const email = document.getElementById("email").value;
-  const senha = document.getElementById("senha").value;
+  const email = document.getElementById('email').value.trim();
+  const senha = document.getElementById('senha').value;
 
-  const res = await fetch("http://localhost:3000/login", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ email, senha }),
-  });
+  const btn = e.target.querySelector('button[type="submit"]');
+  const textoOriginal = btn.textContent;
 
- const data = await res.json();
-
-if (data.sucesso) {
-
-    localStorage.setItem("token", data.token);
-
-    localStorage.setItem(
-        "usuario",
-        JSON.stringify(data.usuario)
-    );
-
-    window.location.href = "/Página/ground_truth_index.html";
-
-} else {
-
-    alert(data.erro);
-}
-
-async function realizarLogin(email, senha) {
-  try {
-    const resposta = await fetch("http://localhost:3000/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, senha })
-    });
-
-    const dados = await resposta.json();
-
-    if (dados.sucesso) {
-      // 1. Salva o token de segurança no navegador
-      localStorage.setItem("token", dados.token);
-
-      // 2. Redireciona para a página ground_truth
-      // (Ajuste o caminho do arquivo caso ele esteja dentro de outra pasta, ex: '../Página/ground_truth.html')
-      window.location.href = "../ground_truth.html";
-    } else {
-      alert(dados.erro);
-    }
-  } catch (erro) {
-    console.error("Erro no login:", erro);
+  // validação simples antes de mandar pro backend
+  if (!email || !senha) {
+    alert('Preencha email e senha.');
+    return;
   }
-}
+
+  btn.disabled = true;
+  btn.textContent = 'Entrando...';
+
+  fetch('/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, senha })
+  })
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok) {
+        window.location.href = '../ground_truth_dataset/ground_truth_index.html';
+      } else {
+        alert(data.message || 'Email ou senha inválidos.');
+      }
+    })
+    .catch((err) => {
+      console.error('Erro no login:', err);
+      alert('Erro ao conectar com o servidor. Tente novamente.');
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = textoOriginal;
+    });
 });
 </script>
 
