@@ -278,27 +278,56 @@ function setStatus(texto, tipo) {
   statusEl.className = classes[tipo] || classes.aguardando;
 }
 
-async function transcreverComGroq(arquivo) {
+async function enviarArquivoNeon(arquivo) {
+  const token = localStorage.getItem("token");
+
+  if (!token) {
+    window.location.href = "../cadastro/login.html";
+    return;
+  }
+
   const formData = new FormData();
-  formData.append('file', arquivo);
+  formData.append("file", arquivo);
+
   try {
-    setStatus('Processando...', 'processando');
-    if (transcriptEl) transcriptEl.textContent = 'Aguarde...';
-    const response = await fetch(`${API}/transcrever`, { method: 'POST', body: formData });
-    const data = await response.json();
-    if (data.erro) {
-      setStatus(data.erro, 'erro');
-      if (transcriptEl) transcriptEl.textContent = '';
-      return;
+    setStatus("Enviando...", "processando");
+
+    if (transcriptEl) {
+      transcriptEl.textContent = "Enviando arquivo...";
     }
-    if (transcriptEl) transcriptEl.textContent = data.texto.trim();
-    setStatus('Transcrição concluída!', 'sucesso');
+
+    const response = await fetch(`${API}/arquivos/upload`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      },
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.sucesso) {
+      throw new Error(data.erro || "Erro no upload.");
+    }
+
+    setStatus("Upload concluído!", "sucesso");
+
+    if (transcriptEl) {
+      transcriptEl.textContent =
+        "Arquivo enviado com sucesso.\n\n" +
+        data.arquivo.nome_original;
+    }
+
+    toast(`"${data.arquivo.nome_original}" salvo na sua conta.`, "success");
   } catch (err) {
-    console.error('Erro:', err);
-    setStatus('Erro ao transcrever: ' + err.message, 'erro');
+    console.error("Erro:", err);
+    setStatus("Erro no upload", "erro");
+
+    if (transcriptEl) {
+      transcriptEl.textContent = err.message;
+    }
   }
 }
-
 function arquivoSelecionado(event) {
   const input = event.target;
   const arquivo = input.files[0];
@@ -314,7 +343,7 @@ function arquivoSelecionado(event) {
     input.value = '';
     return;
   }
-  transcreverComGroq(arquivo);
+  enviarArquivoNeon(arquivo);
 }
 
 function abrirYoutube() {
