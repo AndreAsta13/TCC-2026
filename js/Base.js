@@ -12,36 +12,45 @@ function setStatus(texto, tipo) {
   statusEl.className = classes[tipo] || classes.aguardando;
 }
 
-async function transcreverComGroq(arquivo) {
+async function enviarArquivoNeon(arquivo) {
+  const token = localStorage.getItem("token");
+
+  if (!token) {
+    window.location.href = "cadastro/login.html";
+    return;
+  }
+
   const formData = new FormData();
-  formData.append('file', arquivo);
+  formData.append("file", arquivo);
 
   try {
-    setStatus('Processando...', 'processando');
-    transcriptEl.textContent = 'Aguarde...';
+    setStatus("Enviando...", "processando");
+    transcriptEl.textContent = "Enviando arquivo...";
 
-    const response = await fetch('http://localhost:5000/transcrever', {
-      method: 'POST',
+    const response = await fetch("http://localhost:3000/arquivos/upload", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`
+      },
       body: formData
     });
 
     const data = await response.json();
 
-    if (data.erro) {
-      setStatus(data.erro, 'erro');
-      transcriptEl.textContent = '';
-      return;
+    if (!response.ok || !data.sucesso) {
+      throw new Error(data.erro || "Erro no upload.");
     }
 
-    transcriptEl.textContent = data.texto.trim();
-    setStatus('Transcrição concluída!', 'sucesso');
-
+    setStatus("Upload concluído!", "sucesso");
+    transcriptEl.textContent =
+      "Arquivo enviado com sucesso.\n\n" +
+      data.arquivo.nome_original;
   } catch (err) {
-    console.error('Erro:', err);
-    setStatus('Erro ao transcrever: ' + err.message, 'erro');
+    console.error("Erro:", err);
+    setStatus("Erro no upload", "erro");
+    transcriptEl.textContent = err.message;
   }
 }
-
 function arquivoSelecionado(event) {
   const input = event.target;
   const arquivo = input.files[0];
@@ -61,7 +70,7 @@ function arquivoSelecionado(event) {
     return;
   }
 
-  transcreverComGroq(arquivo);
+  enviarArquivoNeon(arquivo);
 }
 
 function abrirYoutube() {
