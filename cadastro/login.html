@@ -82,7 +82,7 @@ document.getElementById('formLogin').addEventListener('submit', async function (
 
   } catch (err) {
     console.error('Erro no login:', err);
-    alert('Erro ao conectar com o servidor.');
+    alert('Erro ao conectar com o servidor...');
   } finally {
     btn.disabled = false;
     btn.textContent = textoOriginal;
