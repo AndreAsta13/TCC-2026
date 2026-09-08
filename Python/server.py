@@ -18,8 +18,9 @@ print("Importando numpy/soundfile...", flush=True)
 import os, tempfile, shutil, json
 import numpy as np
 import soundfile as sf
+import time
 
-FFMPEG_BIN = r"C:\ffmpeg\ffmpeg-9.0.1-full_build-shared\bin"
+FFMPEG_BIN = r"C:\Users\Felipe\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Shared_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build-shared\bin"
 
 if os.path.isdir(FFMPEG_BIN):
     os.add_dll_directory(FFMPEG_BIN)
@@ -192,7 +193,9 @@ def _diarizar_audio(caminho_wav):
             "fim": round(turno.end, 2),
             "falante": falante
         })
-
+    print("    Primeiros segmentos encontrados pelo pyannote:")
+    print(segmentos[:10])
+    
     return segmentos
 
 
@@ -363,6 +366,8 @@ def _consultar_nomes_proprios(texto, base_nomes, limiar_similaridade=0.75):
 # ---------------------------------------------------------------------------
 def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
     """Recebe um caminho de arquivo já existente em disco e retorna a transcrição com falantes."""
+    inicio_total = time.perf_counter()
+    
     extensao = os.path.splitext(caminho_original)[1].lower()
     print(f"[1/10] Copiando arquivo temporário...")
 
@@ -377,7 +382,7 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
 
     try:
         print(f"[2/10] Verificando duração do arquivo recebido...")
-        duracao_bruta = librosa.get_duration(path=tmp_path)
+        duracao_bruta = float(ffmpeg.probe(tmp_path)["format"]["duration"])
         print(f"[2/10] Duração: {int(duracao_bruta)}s")
 
         if duracao_bruta > LIMITE_SEGUNDOS:
@@ -440,7 +445,14 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
             audio_path = sem_silencio_path
 
         print(f"[7/10] Identificando falantes (diarização)...")
+
+        inicio_diarizacao = time.perf_counter()
+
         segmentos_falantes = _diarizar_audio(audio_path)
+
+        tempo_diarizacao = time.perf_counter() - inicio_diarizacao
+        print(f"[7/10] Tempo da diarização: {tempo_diarizacao:.2f} segundos")
+
         print(f"[7/10] {len(segmentos_falantes)} segmentos de fala identificados")
 
         print(f"[8/10] Transcrevendo com timestamps por palavra (Groq)...")
@@ -461,6 +473,8 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
         for item in resultado:
             print(f"[{item['inicio']}s - {item['fim']}s] {item['falante']}: {item['texto_corrigido']}")
 
+            tempo_total = time.perf_counter() - inicio_total
+        print(f"Tempo total de processamento: {tempo_total:.2f} segundos")
         return resultado
 
     finally:
