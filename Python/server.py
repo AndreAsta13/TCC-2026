@@ -18,6 +18,7 @@ print("Importando numpy/soundfile...", flush=True)
 import os, tempfile, shutil, json
 import numpy as np
 import soundfile as sf
+import concurrent.futures
 
 FFMPEG_BIN = r"C:\ffmpeg\ffmpeg-9.0.1-full_build-shared\bin"
 
@@ -56,11 +57,13 @@ app = Flask(__name__)
 CORS(app)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-# ---------------------------------------------------------------------------
-# Filtros
-# ---------------------------------------------------------------------------
+
 LIMITE_SEGUNDOS = 3600
 HF_TOKEN = os.getenv("HF_TOKEN")
+LIMIAR_MESMA_PESSOA = 0.80
+
+_embedding_model = None
+
 
 _diarization_pipeline = None
 
@@ -71,25 +74,40 @@ _diarization_pipeline = None
 def _detectar_canais(caminho_entrada):
     """
     Inspeciona o arquivo via ffprobe (sem decodificar o áudio de verdade)
-    e retorna um dicionário com o número de canais, layout e taxa de
-    amostragem original da trilha de áudio.
+    e retorna um dicionário com o número de canais, layout, taxa de
+    amostragem original e uma categoria (tipo_canal) usada para decidir
+    a estratégia de processamento: "mono", "estereo" ou "multicanal".
     """
     probe = ffmpeg.probe(caminho_entrada)
     audio_streams = [s for s in probe['streams'] if s['codec_type'] == 'audio']
 
     if not audio_streams:
+        print("    ERRO: Nenhuma trilha de áudio encontrada no arquivo.")
         raise ValueError("Nenhuma trilha de áudio encontrada no arquivo.")
 
     canais = audio_streams[0].get('channels', 1)
     layout = audio_streams[0].get('channel_layout', 'desconhecido')
     taxa_original = audio_streams[0].get('sample_rate', 'desconhecida')
-    tipo_audio = "mono" if canais == 1 else ("estéreo" if canais == 2 else f"multicanal ({canais} canais)")
+
+    if canais == 1:
+        tipo_canal = "mono"
+        tipo_audio = "mono"
+        print(f"    Canal detectado: MONO (1 canal)")
+    elif canais == 2:
+        tipo_canal = "estereo"
+        tipo_audio = "estéreo"
+        print(f"    Canal detectado: ESTÉREO (2 canais)")
+    else:
+        tipo_canal = "multicanal"
+        tipo_audio = f"multicanal ({canais} canais)"
+        print(f"    Canal detectado: MULTICANAL ({canais} canais, layout: {layout})")
 
     return {
         "canais": canais,
         "layout": layout,
         "taxa_original": taxa_original,
-        "tipo_audio": tipo_audio
+        "tipo_audio": tipo_audio,
+        "tipo_canal": tipo_canal  # "mono" | "estereo" | "multicanal" — usado nas decisões do pipeline
     }
 
 
@@ -106,6 +124,45 @@ def _converter_para_wav_lossless(caminho_entrada, caminho_saida, canais):
         ffmpeg
         .input(caminho_entrada)
         .output(caminho_saida, vn=None, acodec='pcm_s16le', ac=canais)
+        .run(quiet=True, overwrite_output=True)
+    )
+
+
+# ---------------------------------------------------------------------------
+# SEPARAÇÃO DE CANAIS — SÓ PARA ESTÉREO
+# (assume que cada canal do estéreo carrega uma voz/falante diferente,
+#  ex: microfone de entrevista com um falante por canal)
+# ---------------------------------------------------------------------------
+def _separar_canais_estereo(caminho_entrada, caminho_esquerdo, caminho_direito):
+    """
+    Separa um WAV estéreo em dois arquivos MONO independentes:
+    canal esquerdo (voz 1) e canal direito (voz 2). Cada um vira um
+    arquivo mono próprio, que segue o pipeline de forma independente.
+    """
+    (
+        ffmpeg
+        .input(caminho_entrada)
+        .output(caminho_esquerdo, af='pan=mono|c0=FL', acodec='pcm_s16le')
+        .run(quiet=True, overwrite_output=True)
+    )
+    (
+        ffmpeg
+        .input(caminho_entrada)
+        .output(caminho_direito, af='pan=mono|c0=FR', acodec='pcm_s16le')
+        .run(quiet=True, overwrite_output=True)
+    )
+
+
+# ---------------------------------------------------------------------------
+# NORMALIZAÇÃO EBU R128 — SINGLE-PASS (reutilizável para qualquer mono:
+# tanto o caminho MONO original quanto cada canal separado do ESTÉREO)
+# ---------------------------------------------------------------------------
+def _normalizar_mono_single_pass(caminho_entrada, caminho_saida):
+    (
+        ffmpeg
+        .input(caminho_entrada)
+        .output(caminho_saida, vn=None, acodec='pcm_s16le', ac=1,
+                af='loudnorm=I=-23:LRA=7:TP=-2')
         .run(quiet=True, overwrite_output=True)
     )
 
@@ -374,6 +431,13 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
     wav_lossless_path = None
     normalizado_path = None
     sem_silencio_path = None
+    # --- Novos temporários, usados só no caminho ESTÉREO (separação + paralelo) ---
+    canal_esq_path = None
+    canal_dir_path = None
+    normalizado_esq_path = None
+    normalizado_dir_path = None
+    sem_silencio_esq_path = None
+    sem_silencio_dir_path = None
 
     try:
         print(f"[2/10] Verificando duração do arquivo recebido...")
@@ -388,56 +452,102 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
             print(f"[3/10] Verificando canais de áudio...")
             info_canais = _detectar_canais(tmp_path)
             canais = info_canais["canais"]
+            tipo_canal = info_canais["tipo_canal"]  # "mono" | "estereo" | "multicanal"
             print(f"[3/10] Áudio detectado: {info_canais['tipo_audio']} "
                   f"(layout: {info_canais['layout']}, taxa: {info_canais['taxa_original']} Hz)")
 
-            # --- Conversão lossless para WAV ---
+            # --- Conversão lossless para WAV (igual para os 3 tipos) ---
             print(f"[4/10] Convertendo {extensao} para WAV sem perda de dados (PCM 16-bit)...")
             wav_lossless_path = tmp_path.rsplit('.', 1)[0] + '_lossless.wav'
             _converter_para_wav_lossless(tmp_path, wav_lossless_path, canais)
             print(f"[4/10] WAV lossless gerado: {wav_lossless_path}")
 
-            # --- Normalização EBU R128 (diferenciada por canal) ---
-            normalizado_path = tmp_path.rsplit('.', 1)[0] + '_normalizado.wav'
+            # =========================================================
+            # ESTRATÉGIA POR TIPO DE CANAL (a partir daqui os caminhos divergem)
+            # =========================================================
+            if tipo_canal == "estereo":
+                # --- ESTÉREO: separa as duas vozes (canal esquerdo/direito) ---
+                print(f"[5/10] Separando canais estéreo em duas vozes (esquerda/direita)...")
+                canal_esq_path = tmp_path.rsplit('.', 1)[0] + '_esq.wav'
+                canal_dir_path = tmp_path.rsplit('.', 1)[0] + '_dir.wav'
+                _separar_canais_estereo(wav_lossless_path, canal_esq_path, canal_dir_path)
+                print(f"[5/10] Canais separados: {canal_esq_path} | {canal_dir_path}")
 
-            if canais == 1:
-                print(f"[5/10] Normalizando loudness EBU R128 (single-pass)...")
-                (
-                    ffmpeg.input(wav_lossless_path)
-                    .output(normalizado_path, vn=None, acodec='pcm_s16le', ac=1,
-                            af='loudnorm=I=-23:LRA=7:TP=-2')
-                    .run(quiet=True, overwrite_output=True)
-                )
+                # --- Normalização EBU R128 dos dois canais EM PARALELO (multitarefa) ---
+                # Cada canal separado já é mono, então usa o mesmo normalizador
+                # single-pass que o caminho MONO original usa — só que rodando
+                # os dois ao mesmo tempo, em threads separadas.
+                print(f"[6/10] Normalizando os dois canais em paralelo (EBU R128 single-pass, multitarefa)...")
+                normalizado_esq_path = tmp_path.rsplit('.', 1)[0] + '_esq_normalizado.wav'
+                normalizado_dir_path = tmp_path.rsplit('.', 1)[0] + '_dir_normalizado.wav'
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    futuro_esq = executor.submit(
+                        _normalizar_mono_single_pass, canal_esq_path, normalizado_esq_path
+                    )
+                    futuro_dir = executor.submit(
+                        _normalizar_mono_single_pass, canal_dir_path, normalizado_dir_path
+                    )
+                    futuro_esq.result()  # propaga exceção, se houver, de qualquer uma das duas threads
+                    futuro_dir.result()
+
+                print(f"[6/10] Normalização concluída em paralelo para os dois canais.")
+                print(f"    Canal esquerdo normalizado: {normalizado_esq_path}")
+                print(f"    Canal direito normalizado: {normalizado_dir_path}")
+
+                # ------------------------------------------------------------------
+                # PONTO DE PARADA DESTA ETAPA (combinado com você):
+                # o VAD, a diarização e a transcrição ainda não foram adaptados
+                # para rodar sobre os dois canais separados. Isso fica para a
+                # próxima etapa da revisão. Por ora, retornamos aqui com os dois
+                # caminhos normalizados, sem quebrar o fluxo de mono/multicanal.
+                # ------------------------------------------------------------------
+                print("\n[AVISO] Estratégia ESTÉREO implementada até a normalização (separação + processamento paralelo).")
+                print("[AVISO] Próxima etapa: adaptar VAD/diarização/transcrição para os dois canais separados.")
+                return {
+                    "tipo_canal": "estereo",
+                    "canal_esquerdo_normalizado": normalizado_esq_path,
+                    "canal_direito_normalizado": normalizado_dir_path
+                }
+
             else:
-                print(f"[5a/10] Medindo loudness (passada 1/2)...")
-                medidas = _medir_loudness(wav_lossless_path)
-                print(f"[5a/10] Medido: I={medidas['input_i']} LUFS, TP={medidas['input_tp']} dBTP")
+                # --- MONO / MULTICANAL: fluxo original, sem separação de canais ---
+                normalizado_path = tmp_path.rsplit('.', 1)[0] + '_normalizado.wav'
 
-                print(f"[5b/10] Reamostrando 16kHz + normalização precisa (passada 2/2)...")
-                filtro_preciso = (
-                    f"loudnorm=I=-23:LRA=7:TP=-2:"
-                    f"measured_I={medidas['input_i']}:"
-                    f"measured_LRA={medidas['input_lra']}:"
-                    f"measured_TP={medidas['input_tp']}:"
-                    f"measured_thresh={medidas['input_thresh']}:"
-                    f"offset={medidas['target_offset']}:linear=true"
-                )
-                (
-                    ffmpeg.input(wav_lossless_path)
-                    .output(normalizado_path, vn=None, acodec='pcm_s16le', ac=canais,
-                            ar=16000, af=filtro_preciso)
-                    .run(quiet=True, overwrite_output=True)
-                )
+                if tipo_canal == "mono":
+                    print(f"[5/10] Normalizando loudness EBU R128 (single-pass)...")
+                    _normalizar_mono_single_pass(wav_lossless_path, normalizado_path)
+                else:
+                    print(f"[5a/10] Multicanal com {canais} canais — aplicando two-pass...")
+                    print(f"[5a/10] Medindo loudness (passada 1/2)...")
+                    medidas = _medir_loudness(wav_lossless_path)
+                    print(f"[5a/10] Medido: I={medidas['input_i']} LUFS, TP={medidas['input_tp']} dBTP")
 
-            print(f"[5/10] WAV normalizado gerado: {normalizado_path}")
+                    print(f"[5b/10] Reamostrando 16kHz + normalização precisa (passada 2/2)...")
+                    filtro_preciso = (
+                        f"loudnorm=I=-23:LRA=7:TP=-2:"
+                        f"measured_I={medidas['input_i']}:"
+                        f"measured_LRA={medidas['input_lra']}:"
+                        f"measured_TP={medidas['input_tp']}:"
+                        f"measured_thresh={medidas['input_thresh']}:"
+                        f"offset={medidas['target_offset']}:linear=true"
+                    )
+                    (
+                        ffmpeg.input(wav_lossless_path)
+                        .output(normalizado_path, vn=None, acodec='pcm_s16le', ac=canais,
+                                ar=16000, af=filtro_preciso)
+                        .run(quiet=True, overwrite_output=True)
+                    )
 
-            # --- Enquadramento + remoção de silêncio (sobre o áudio já normalizado) ---
-            print(f"[6/10] Enquadrando e removendo trechos de silêncio (VAD por energia, 25ms/10ms, top_db={top_db})...")
-            sem_silencio_path = tmp_path.rsplit('.', 1)[0] + '_final.wav'
-            _enquadrar_e_remover_silencio(normalizado_path, sem_silencio_path, top_db=top_db)
-            print(f"[6/10] Concluído: {sem_silencio_path}")
+                print(f"[5/10] WAV normalizado gerado: {normalizado_path}")
 
-            audio_path = sem_silencio_path
+                # --- Enquadramento + remoção de silêncio (sobre o áudio já normalizado) ---
+                print(f"[6/10] Enquadrando e removendo trechos de silêncio (VAD por energia, 25ms/10ms, top_db={top_db})...")
+                sem_silencio_path = tmp_path.rsplit('.', 1)[0] + '_final.wav'
+                _enquadrar_e_remover_silencio(normalizado_path, sem_silencio_path, top_db=top_db)
+                print(f"[6/10] Concluído: {sem_silencio_path}")
+
+                audio_path = sem_silencio_path
 
         print(f"[7/10] Identificando falantes (diarização)...")
         segmentos_falantes = _diarizar_audio(audio_path)
@@ -471,6 +581,15 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
             os.remove(normalizado_path)
         if sem_silencio_path and os.path.exists(sem_silencio_path):
             os.remove(sem_silencio_path)
+        # Intermediários da separação estéreo (pré-normalização) — sempre removidos
+        if canal_esq_path and os.path.exists(canal_esq_path):
+            os.remove(canal_esq_path)
+        if canal_dir_path and os.path.exists(canal_dir_path):
+            os.remove(canal_dir_path)
+        # NOTA: normalizado_esq_path / normalizado_dir_path NÃO são removidos aqui —
+        # é justamente esse resultado que a função retorna nesta etapa transitória
+        # (o VAD/diarização/transcrição para o modo estéreo ainda serão implementados
+        # na próxima iteração). Fica a cargo de quem chama limpar esses arquivos depois.
 
 
 @app.route('/transcrever', methods=['POST'])
@@ -521,8 +640,8 @@ if __name__ == '__main__':
         _testar_consulta_nomes()
     elif TESTE_LOCAL:
         diretorio_script = os.path.dirname(os.path.abspath(__file__))
-        pasta_testes = os.path.join(os.path.dirname(diretorio_script), "Teste Video")
-        arquivos_teste = ["Teste1.mp4"]
+        pasta_testes = os.path.join(os.path.dirname(diretorio_script), "Teste Video/Teste_canal")
+        arquivos_teste = ["teste_estereo.mp4"]
 
         print(f"\n[DIAGNÓSTICO] Diretório do script: {diretorio_script}")
         print(f"[DIAGNÓSTICO] Pasta de testes esperada: {pasta_testes}")
@@ -550,7 +669,12 @@ if __name__ == '__main__':
         print("  RESUMO DOS TESTES")
         print(f"{'=' * 70}")
         for nome_arquivo, resultado in resultados.items():
-            status = f"OK ({len(resultado)} blocos)" if resultado is not None else "FALHOU"
+            if resultado is None:
+                status = "FALHOU"
+            elif isinstance(resultado, dict) and resultado.get("tipo_canal") == "estereo":
+                status = "OK (estéreo — parou na normalização, ver [AVISO] acima)"
+            else:
+                status = f"OK ({len(resultado)} blocos)"
             print(f"  {nome_arquivo}: {status}")
     else:
         app.run(debug=True)
