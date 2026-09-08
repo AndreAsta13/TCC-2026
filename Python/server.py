@@ -18,9 +18,10 @@ print("Importando numpy/soundfile...", flush=True)
 import os, tempfile, shutil, json
 import numpy as np
 import soundfile as sf
+import time
 import concurrent.futures
 
-FFMPEG_BIN = r"C:\ffmpeg\ffmpeg-9.0.1-full_build-shared\bin"
+FFMPEG_BIN = r"C:\Users\Felipe\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Shared_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build-shared\bin"
 
 if os.path.isdir(FFMPEG_BIN):
     os.add_dll_directory(FFMPEG_BIN)
@@ -217,6 +218,8 @@ def _enquadrar_e_remover_silencio(caminho_entrada, caminho_saida, top_db=40):
     dados_para_salvar = y_final.T if y_final.ndim > 1 else y_final
     sf.write(caminho_saida, dados_para_salvar, sr)
 
+    return intervalos, sr 
+
 
 # ---------------------------------------------------------------------------
 # DIARIZAÇÃO (pyannote.audio, local)
@@ -249,13 +252,42 @@ def _diarizar_audio(caminho_wav):
             "fim": round(turno.end, 2),
             "falante": falante
         })
-
+    print("    Primeiros segmentos encontrados pelo pyannote:")
+    print(segmentos[:10])
+    
     return segmentos
 
 
 # ---------------------------------------------------------------------------
 # TRANSCRIÇÃO COM TIMESTAMPS POR PALAVRA (Groq)
 # ---------------------------------------------------------------------------
+def _mapear_timestamp_original(tempo_comprimido, intervalos, sr):
+    """
+    Converte um timestamp do áudio sem silêncio para o timestamp
+    correspondente no áudio original.
+
+    tempo_comprimido: tempo retornado pelo Whisper, em segundos.
+    intervalos: intervalos de fala encontrados pelo VAD, em amostras.
+    sr: taxa de amostragem do áudio.
+    """
+
+    tempo_restante = tempo_comprimido
+
+    for inicio, fim in intervalos:
+        duracao_intervalo = (fim - inicio) / sr
+
+        if tempo_restante <= duracao_intervalo:
+            return (inicio / sr) + tempo_restante
+
+        tempo_restante -= duracao_intervalo
+
+    # Caso o timestamp esteja além dos intervalos encontrados,
+    # mantém o valor no final do último intervalo.
+    if intervalos:
+        return intervalos[-1][1] / sr
+
+    return tempo_comprimido
+
 def _transcrever_com_timestamps(audio_path):
     with open(audio_path, 'rb') as f:
         resposta = client.audio.transcriptions.create(
@@ -272,26 +304,62 @@ def _transcrever_com_timestamps(audio_path):
 # ---------------------------------------------------------------------------
 def _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao):
     palavras_com_falante = []
+
     for palavra in palavras_transcricao:
         inicio_p, fim_p = palavra['start'], palavra['end']
         melhor_falante, maior_sobreposicao = "DESCONHECIDO", 0.0
+        menor_distancia = float("inf")
+
         for seg_falante in segmentos_falantes:
             sobreposicao = min(fim_p, seg_falante['fim']) - max(inicio_p, seg_falante['inicio'])
+
             if sobreposicao > maior_sobreposicao:
-                maior_sobreposicao = sobreposicao
-                melhor_falante = seg_falante['falante']
-        palavras_com_falante.append({
-            "inicio": round(inicio_p, 2), "fim": round(fim_p, 2),
-            "falante": melhor_falante, "palavra": palavra['word'].strip()
+               maior_sobreposicao = sobreposicao
+               melhor_falante = seg_falante['falante']
+
+            else:
+                if fim_p < seg_falante['inicio']:
+                   distancia = seg_falante['inicio'] - fim_p
+                elif inicio_p > seg_falante['fim']:
+                     distancia = inicio_p - seg_falante['fim']
+                else:
+                     distancia = 0.0
+
+                if distancia < menor_distancia:
+                   menor_distancia = distancia
+                   falante_mais_proximo = seg_falante['falante']
+
+    if melhor_falante == "DESCONHECIDO" and menor_distancia <= 0.50:
+       melhor_falante = falante_mais_proximo
+
+    palavras_com_falante.append({
+            "inicio": round(inicio_p, 2),
+            "fim": round(fim_p, 2),
+            "falante": melhor_falante,
+            "palavra": palavra['word'].strip()
         })
+
+    print("\n    ===== DIAGNÓSTICO DE PALAVRAS DESCONHECIDASS =====")
+
+    for palavra in palavras_com_falante:
+        if palavra["falante"] == "DESCONHECIDO":
+            print(
+                f"    Palavra desconhecida: "
+                f"'{palavra['palavra']}' "
+                f"[{palavra['inicio']:.2f}s - {palavra['fim']:.2f}s]"
+            )
+
+    print("    ===============================================\n")
 
     if not palavras_com_falante:
         return []
 
     blocos = []
     bloco_atual = {
-        "inicio": palavras_com_falante[0]["inicio"], "fim": palavras_com_falante[0]["fim"],
-        "falante": palavras_com_falante[0]["falante"], "palavras": [palavras_com_falante[0]["palavra"]]
+        "inicio": palavras_com_falante[0]["inicio"],
+        "fim": palavras_com_falante[0]["fim"],
+        "falante": palavras_com_falante[0]["falante"],
+        "palavras": [palavras_com_falante[0]["palavra"]]
     }
 
     for p in palavras_com_falante[1:]:
@@ -300,14 +368,24 @@ def _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao):
             bloco_atual["palavras"].append(p["palavra"])
         else:
             blocos.append({
-                "inicio": bloco_atual["inicio"], "fim": bloco_atual["fim"],
-                "falante": bloco_atual["falante"], "texto": " ".join(bloco_atual["palavras"])
+                "inicio": bloco_atual["inicio"],
+                "fim": bloco_atual["fim"],
+                "falante": bloco_atual["falante"],
+                "texto": " ".join(bloco_atual["palavras"])
             })
-            bloco_atual = {"inicio": p["inicio"], "fim": p["fim"], "falante": p["falante"], "palavras": [p["palavra"]]}
+
+            bloco_atual = {
+                "inicio": p["inicio"],
+                "fim": p["fim"],
+                "falante": p["falante"],
+                "palavras": [p["palavra"]]
+            }
 
     blocos.append({
-        "inicio": bloco_atual["inicio"], "fim": bloco_atual["fim"],
-        "falante": bloco_atual["falante"], "texto": " ".join(bloco_atual["palavras"])
+        "inicio": bloco_atual["inicio"],
+        "fim": bloco_atual["fim"],
+        "falante": bloco_atual["falante"],
+        "texto": " ".join(bloco_atual["palavras"])
     })
 
     return blocos
@@ -420,6 +498,8 @@ def _consultar_nomes_proprios(texto, base_nomes, limiar_similaridade=0.75):
 # ---------------------------------------------------------------------------
 def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
     """Recebe um caminho de arquivo já existente em disco e retorna a transcrição com falantes."""
+    inicio_total = time.perf_counter()
+    
     extensao = os.path.splitext(caminho_original)[1].lower()
     print(f"[1/10] Copiando arquivo temporário...")
 
@@ -441,7 +521,7 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
 
     try:
         print(f"[2/10] Verificando duração do arquivo recebido...")
-        duracao_bruta = librosa.get_duration(path=tmp_path)
+        duracao_bruta = float(ffmpeg.probe(tmp_path)["format"]["duration"])
         print(f"[2/10] Duração: {int(duracao_bruta)}s")
 
         if duracao_bruta > LIMITE_SEGUNDOS:
@@ -544,17 +624,40 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
                 # --- Enquadramento + remoção de silêncio (sobre o áudio já normalizado) ---
                 print(f"[6/10] Enquadrando e removendo trechos de silêncio (VAD por energia, 25ms/10ms, top_db={top_db})...")
                 sem_silencio_path = tmp_path.rsplit('.', 1)[0] + '_final.wav'
-                _enquadrar_e_remover_silencio(normalizado_path, sem_silencio_path, top_db=top_db)
+                intervalos_silencio, sr_audio = _enquadrar_e_remover_silencio(
+                normalizado_path,
+                sem_silencio_path,
+                top_db=top_db
+            )
                 print(f"[6/10] Concluído: {sem_silencio_path}")
 
                 audio_path = sem_silencio_path
 
         print(f"[7/10] Identificando falantes (diarização)...")
+
+        inicio_diarizacao = time.perf_counter()
+
         segmentos_falantes = _diarizar_audio(audio_path)
+
+        tempo_diarizacao = time.perf_counter() - inicio_diarizacao
+        print(f"[7/10] Tempo da diarização: {tempo_diarizacao:.2f} segundos")
+
         print(f"[7/10] {len(segmentos_falantes)} segmentos de fala identificados")
 
         print(f"[8/10] Transcrevendo com timestamps por palavra (Groq)...")
         palavras_transcricao = _transcrever_com_timestamps(audio_path)
+
+        for palavra in palavras_transcricao:
+            palavra["start"] = _mapear_timestamp_original(
+                palavra["start"],
+                intervalos_silencio,
+                sr_audio
+            )
+            palavra["end"] = _mapear_timestamp_original(
+                palavra["end"],
+                intervalos_silencio,
+                sr_audio
+            )
 
         resultado = _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao)
 
@@ -571,6 +674,8 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
         for item in resultado:
             print(f"[{item['inicio']}s - {item['fim']}s] {item['falante']}: {item['texto_corrigido']}")
 
+            tempo_total = time.perf_counter() - inicio_total
+        print(f"Tempo total de processamento: {tempo_total:.2f} segundos")
         return resultado
 
     finally:
