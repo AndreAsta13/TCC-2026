@@ -4,15 +4,20 @@ print("Importando Flask...", flush=True)
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-print("Importando Groq...", flush=True)
-from groq import Groq
-from dotenv import load_dotenv
+print("Importando ffmpeg...", flush=True)
+import ffmpeg
+
+print("Importando difflib...", flush=True)
+from difflib import SequenceMatcher
+import re
+import unicodedata
 
 print("Importando librosa (pode demorar um pouco)...", flush=True)
 import librosa
 
-print("Importando ffmpeg...", flush=True)
-import ffmpeg
+print("Importando Groq...", flush=True)
+from groq import Groq
+from dotenv import load_dotenv
 
 print("Importando numpy/soundfile...", flush=True)
 import os, tempfile, shutil, json
@@ -67,6 +72,19 @@ _diarization_pipeline = None
 
 
 # ---------------------------------------------------------------------------
+# ACESSO SEGURO A CAMPOS (dict OU objeto do SDK) — usado pelas heurísticas de
+# alucinação, que leem campos opcionais (no_speech_prob, avg_logprob, etc.)
+# que podem não existir dependendo da versão da resposta do Groq.
+# ---------------------------------------------------------------------------
+def _campo(obj, chave, padrao=None):
+    if obj is None:
+        return padrao
+    if isinstance(obj, dict):
+        return obj.get(chave, padrao)
+    return getattr(obj, chave, padrao)
+
+
+# ---------------------------------------------------------------------------
 # DETECÇÃO DE CANAIS (mono / estéreo / multicanal)
 # ---------------------------------------------------------------------------
 def _detectar_canais(caminho_entrada):
@@ -109,22 +127,92 @@ def _detectar_canais(caminho_entrada):
     }
 
 
+
 # ---------------------------------------------------------------------------
-# CONVERSÃO LOSSLESS PARA WAV (antes de qualquer normalização/VAD)
+# CONVERSÃO PARA WAV PCM 16-BIT + INFORMAÇÕES DOS BITS
 # ---------------------------------------------------------------------------
 def _converter_para_wav_lossless(caminho_entrada, caminho_saida, canais):
     """
-    Converte MP4/MP3 para WAV sem perda de qualidade (PCM 16-bit),
-    preservando canais e taxa de amostragem original. Sem normalização
-    nem reamostragem ainda — isso acontece na etapa seguinte.
+    Converte o áudio para WAV PCM 16-bit.
+
+    Registra:
+    - Bits originais, quando disponíveis.
+    - Bits convertidos.
+    - Formato original e convertido.
+    - Quantidade de canais.
+    - Taxa de amostragem original.
     """
+
+    # 1. Consultar informações do arquivo original
+    info_original = ffmpeg.probe(caminho_entrada)
+
+    stream_original = next(
+        (
+            stream
+            for stream in info_original.get("streams", [])
+            if stream.get("codec_type") == "audio"
+        ),
+        {}
+    )
+
+    bits_original = stream_original.get("bits_per_sample")
+
+    # Alguns arquivos não informam diretamente a profundidade de bits.
+    if bits_original is not None:
+        bits_original = int(bits_original)
+
+    formato_original = stream_original.get("codec_name")
+    sample_fmt_original = stream_original.get("sample_fmt")
+    taxa_original = stream_original.get("sample_rate")
+    canais_originais = stream_original.get("channels")
+
+    # 2. Converter para WAV PCM 16-bit
     (
         ffmpeg
         .input(caminho_entrada)
-        .output(caminho_saida, vn=None, acodec='pcm_s16le', ac=canais)
+        .output(
+            caminho_saida,
+            vn=None,
+            acodec="pcm_s16le",
+            ac=canais
+        )
         .run(quiet=True, overwrite_output=True)
     )
 
+    # 3. Consultar informações do arquivo convertido
+    info_convertido = ffmpeg.probe(caminho_saida)
+
+    stream_convertido = next(
+        (
+            stream
+            for stream in info_convertido.get("streams", [])
+            if stream.get("codec_type") == "audio"
+        ),
+        {}
+    )
+
+    bits_convertidos = stream_convertido.get("bits_per_sample")
+
+    if bits_convertidos is not None:
+        bits_convertidos = int(bits_convertidos)
+
+    # 4. Retornar informações para o restante do TCC
+    return {
+        "bits_original": bits_original,
+        "bits_convertidos": bits_convertidos,
+        "formato_original": formato_original,
+        "formato_convertido": stream_convertido.get("codec_name"),
+        "sample_fmt_original": sample_fmt_original,
+        "sample_fmt_convertido": stream_convertido.get("sample_fmt"),
+        "taxa_amostragem_original": taxa_original,
+        "canais_originais": canais_originais,
+        "canais_convertidos": stream_convertido.get("channels"),
+        "observacao": (
+            "Conversão para PCM 16-bit. "
+            "A conversão não é lossless em profundidade de bits "
+            "quando o original possui mais de 16 bits."
+        )
+    }
 
 # ---------------------------------------------------------------------------
 # SEPARAÇÃO DE CANAIS — SÓ PARA ESTÉREO
@@ -149,6 +237,41 @@ def _separar_canais_estereo(caminho_entrada, caminho_esquerdo, caminho_direito):
         .output(caminho_direito, af='pan=mono|c0=FR', acodec='pcm_s16le')
         .run(quiet=True, overwrite_output=True)
     )
+   # ---------------------------------------------------------------------------
+# SEPARAÇÃO DE CANAIS — MULTICANAL (generalização de _separar_canais_estereo
+# para N canais, um arquivo mono por canal: c0, c1, ..., cN-1)
+# ---------------------------------------------------------------------------
+def _separar_canais_multicanal(caminho_entrada, num_canais):
+    """
+    Separa um WAV multicanal em N arquivos MONO independentes (um por
+    canal). Mesma ideia de _separar_canais_estereo, só que para qualquer
+    número de canais, não só 2.
+    """
+    caminhos = []
+    base = caminho_entrada.rsplit('.', 1)[0]
+    for i in range(num_canais):
+        caminho_canal = f"{base}_canal{i}.wav"
+        (
+            ffmpeg
+            .input(caminho_entrada)
+            .output(caminho_canal, af=f'pan=mono|c0=c{i}', acodec='pcm_s16le')
+            .run(quiet=True, overwrite_output=True)
+        )
+        caminhos.append(caminho_canal)
+    return caminhos
+
+def _run_ffmpeg(stream, contexto=""):
+    """
+    Roda um stream do ffmpeg-python capturando stdout/stderr de verdade,
+    para que erros mostrem a causa real em vez de 'ffmpeg error (see stderr...)'.
+    """
+    try:
+        out, err = stream.run(capture_stdout=True, capture_stderr=True, overwrite_output=True)
+        return out, err
+    except ffmpeg.Error as e:
+        stderr_txt = e.stderr.decode('utf-8', errors='replace') if e.stderr else "(sem stderr capturado)"
+        print(f"    [FFMPEG ERROR] {contexto}\n{stderr_txt}", flush=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -166,24 +289,10 @@ def _normalizar_mono_single_pass(caminho_entrada, caminho_saida):
 
 
 # ---------------------------------------------------------------------------
-# NORMALIZAÇÃO EBU R128 — MEDIÇÃO (usada no two-pass do caminho multicanal)
-# ---------------------------------------------------------------------------
-def _medir_loudness(caminho_entrada):
-    out, err = (
-        ffmpeg
-        .input(caminho_entrada)
-        .output('-', af='loudnorm=I=-23:LRA=7:TP=-2:print_format=json', format='null')
-        .run(capture_stdout=True, capture_stderr=True)
-    )
-    saida = err.decode('utf-8')
-    inicio = saida.rfind('{')
-    fim = saida.rfind('}') + 1
-    return json.loads(saida[inicio:fim])
-
-
-# ---------------------------------------------------------------------------
-# ENQUADRAMENTO + REMOÇÃO DE SILÊNCIO
+# ENQUADRAMENTO
 # (roda sobre o áudio já convertido em WAV E normalizado)
+# Usado no caminho MONO — aqui o áudio É cortado, gerando um novo arquivo
+# sem os trechos de silêncio.
 # ---------------------------------------------------------------------------
 def _enquadrar_e_remover_silencio(caminho_entrada, caminho_saida, top_db=40):
     y, sr = librosa.load(caminho_entrada, sr=None, mono=False)
@@ -214,6 +323,552 @@ def _enquadrar_e_remover_silencio(caminho_entrada, caminho_saida, top_db=40):
 
     dados_para_salvar = y_final.T if y_final.ndim > 1 else y_final
     sf.write(caminho_saida, dados_para_salvar, sr)
+
+
+# ---------------------------------------------------------------------------
+# DETECÇÃO DE INTERVALOS DE FALA — SEM CORTAR O ÁUDIO (usado no ESTÉREO/MULTICANAL
+# e também para cruzar com a transcrição na checagem de "fala fantasma")
+# ---------------------------------------------------------------------------
+# Diferente de _enquadrar_e_remover_silencio, esta função NÃO gera um
+# novo arquivo e NÃO corta nada — ela só identifica onde está a fala.
+# Isso é importante para os caminhos com múltiplos canais: se cortássemos
+# cada canal de forma independente (cada um com silêncios diferentes
+# removidos), os timestamps deixariam de corresponder ao tempo real do
+# áudio original, e a comparação entre canais (que depende de
+# sobreposição de tempo) ficaria errada.
+#
+# Retorna (intervalos, sr): os intervalos vêm em AMOSTRAS (não segundos),
+# por isso devolvemos também o sample rate — quem for cruzar esses
+# intervalos com timestamps em segundos (ex: a checagem de alucinação)
+# precisa dividir por sr.
+def _detectar_intervalos_fala(caminho_entrada, top_db=40):
+    y, sr = librosa.load(caminho_entrada, sr=None, mono=True)
+
+    frame_length = int(0.025 * sr)
+    hop_length = int(0.010 * sr)
+
+    intervalos = librosa.effects.split(
+        y, top_db=top_db,
+        frame_length=frame_length, hop_length=hop_length
+    )
+
+    return intervalos, sr
+
+
+
+# ---------------------------------------------------------------------------
+# NORMALIZAÇÃO EBU R128 — TWO-PASS PARA UM ÚNICO CANAL MONO
+# (usado nos canais já separados do MULTICANAL — cada canal vira um
+# arquivo mono independente, mas continua usando two-pass, seguindo a
+# regra já combinada: a decisão de single/two-pass é pelo tipo de
+# arquivo ORIGINAL — mono usa single-pass, multicanal usa two-pass,
+# mesmo depois de cada canal do multicanal virar um arquivo mono próprio)
+# ---------------------------------------------------------------------------
+def _medir_loudness_mono(caminho_entrada):
+    """Medição EBU R128 (passada 1/2, ou diagnóstico avulso) para um único arquivo mono."""
+    try:
+        out, err = (
+            ffmpeg
+            .input(caminho_entrada)
+            .output('-', af='loudnorm=I=-23:LRA=7:TP=-2:print_format=json', format='null')
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+    except ffmpeg.Error as e:
+        stderr_txt = e.stderr.decode('utf-8', errors='replace') if e.stderr else "(sem stderr)"
+        print(f"    [FFMPEG ERROR] medir loudness de {caminho_entrada}:\n{stderr_txt}", flush=True)
+        raise
+
+    saida = err.decode('utf-8')
+    inicio = saida.rfind('{')
+    fim = saida.rfind('}') + 1
+    medidas = json.loads(saida[inicio:fim])
+    return medidas
+
+
+def _normalizar_mono_two_pass(caminho_entrada, caminho_saida):
+    """Normalização EBU R128 two-pass (mede, depois aplica com precisão) para um canal mono."""
+    medidas = _medir_loudness_mono(caminho_entrada)
+
+    # --- Blindagem contra canal silencioso (LFE, canal vazio em teste curto, etc.) ---
+    # Quando o canal é silêncio digital puro, o loudnorm retorna measured_I = "-inf",
+    # e o filtro two-pass com linear=true quebra ao receber esse valor.
+    # Nesse caso, caímos para single-pass (não-linear), que tolera silêncio.
+    try:
+        measured_i = float(medidas['input_i'])
+        measured_tp = float(medidas['input_tp'])
+        canal_silencioso = measured_i == float('-inf') or measured_tp == float('-inf')
+    except (ValueError, KeyError):
+        canal_silencioso = True
+
+    if canal_silencioso:
+        print(f"    [AVISO] Canal praticamente silencioso detectado ({caminho_entrada}); "
+              f"usando normalização single-pass (não-linear) em vez de two-pass.", flush=True)
+        _normalizar_mono_single_pass(caminho_entrada, caminho_saida)
+        return
+
+    filtro_preciso = (
+        f"loudnorm=I=-23:LRA=7:TP=-2:"
+        f"measured_I={medidas['input_i']}:"
+        f"measured_LRA={medidas['input_lra']}:"
+        f"measured_TP={medidas['input_tp']}:"
+        f"measured_thresh={medidas['input_thresh']}:"
+        f"offset={medidas['target_offset']}:linear=true"
+    )
+    try:
+        (
+            ffmpeg
+            .input(caminho_entrada)
+            .output(caminho_saida, vn=None, acodec='pcm_s16le', ac=1, af=filtro_preciso)
+            .run(quiet=True, overwrite_output=True)
+        )
+    except ffmpeg.Error as e:
+        stderr_txt = e.stderr.decode('utf-8', errors='replace') if e.stderr else "(sem stderr — rode com capture_stderr=True)"
+        print(f"    [FFMPEG ERROR] normalizar two-pass {caminho_entrada}:\n{stderr_txt}", flush=True)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# ANÁLISE DE QUALIDADE PÓS-NORMALIZAÇÃO
+# ---------------------------------------------------------------------------
+# Roda logo depois de QUALQUER normalização (mono single-pass, canais do
+# estéreo, canais do multicanal two-pass). Não altera o áudio — é só
+# diagnóstico, tanto para log quanto para devolver no retorno da API,
+# junto da transcrição.
+def _analisar_qualidade_audio(caminho_audio, rotulo=""):
+    """
+    Diagnóstico de qualidade sobre um arquivo JÁ normalizado:
+    - Loudness integrada, LRA e true peak (via ffmpeg loudnorm, só medindo)
+    - Pico e RMS em dBFS (via numpy, sobre as amostras reais do arquivo)
+    - Proporção de amostras "coladas" no teto (indício de clipping)
+
+    Gera alertas quando algo foge do esperado para o alvo de normalização
+    usado no pipeline (I=-23 LUFS, TP=-2 dBTP).
+    """
+    loudness_integrada = true_peak = lra = None
+    try:
+        medidas = _medir_loudness_mono(caminho_audio)
+        loudness_integrada = float(medidas['input_i'])
+        true_peak = float(medidas['input_tp'])
+        lra = float(medidas['input_lra'])
+    except Exception as e:
+        print(f"    [QUALIDADE] Aviso: não foi possível medir loudness de {caminho_audio}: {e}", flush=True)
+
+    pico_dbfs = rms_dbfs = None
+    proporcao_clipping = 0.0
+    try:
+        y, sr = sf.read(caminho_audio)
+        if y.ndim > 1:
+            y = y.mean(axis=1)
+        y = y.astype(np.float64)
+
+        pico = float(np.max(np.abs(y))) if y.size else 0.0
+        pico_dbfs = 20 * np.log10(pico) if pico > 0 else float('-inf')
+
+        rms = float(np.sqrt(np.mean(np.square(y)))) if y.size else 0.0
+        rms_dbfs = 20 * np.log10(rms) if rms > 0 else float('-inf')
+
+        amostras_no_teto = int(np.sum(np.abs(y) >= 0.999))
+        proporcao_clipping = amostras_no_teto / y.size if y.size else 0.0
+    except Exception as e:
+        print(f"    [QUALIDADE] Aviso: não foi possível analisar amostras de {caminho_audio}: {e}", flush=True)
+
+    alertas = []
+    if proporcao_clipping > 0.001:
+        alertas.append(f"possível clipping ({proporcao_clipping * 100:.2f}% das amostras no teto)")
+    if loudness_integrada is not None and loudness_integrada < -40:
+        alertas.append(f"áudio muito baixo mesmo após normalização ({loudness_integrada:.1f} LUFS)")
+    if true_peak is not None and true_peak > -1.0:
+        alertas.append(f"true peak acima do recomendado ({true_peak:.1f} dBTP, alvo é -2 dBTP)")
+    if rms_dbfs is not None and rms_dbfs != float('-inf') and rms_dbfs < -50:
+        alertas.append(f"RMS muito baixo ({rms_dbfs:.1f} dBFS) — possível trecho quase silencioso")
+
+    relatorio = {
+        "canal": rotulo,
+        "loudness_integrada_lufs": loudness_integrada,
+        "true_peak_dbtp": true_peak,
+        "lra": lra,
+        "pico_dbfs": pico_dbfs,
+        "rms_dbfs": rms_dbfs,
+        "proporcao_clipping": proporcao_clipping,
+        "alertas": alertas,
+    }
+
+    prefixo = f"[QUALIDADE{' - ' + rotulo if rotulo else ''}]"
+    if loudness_integrada is not None:
+        print(f"    {prefixo} Loudness: {loudness_integrada:.1f} LUFS | "
+              f"TP: {true_peak:.1f} dBTP | LRA: {lra:.1f} | "
+              f"Pico: {pico_dbfs:.1f} dBFS | RMS: {rms_dbfs:.1f} dBFS", flush=True)
+    if alertas:
+        for alerta in alertas:
+            print(f"    {prefixo} ALERTA: {alerta}", flush=True)
+    else:
+        print(f"    {prefixo} Nenhum problema detectado.", flush=True)
+
+    return relatorio
+
+
+# ---------------------------------------------------------------------------
+# Comparação de Falantes (difflib, re, unicodedata) — Estéreo/Multicanal
+# ---------------------------------------------------------------------------
+
+def _normalizar_texto_comparacao(texto):
+    """
+    Normaliza o texto apenas para comparação.
+    Não altera o texto original da transcrição.
+    """
+
+    if not texto:
+        return ""
+
+    texto = texto.lower().strip()
+
+    # Remove acentos
+    texto = unicodedata.normalize("NFD", texto)
+    texto = "".join(
+        c for c in texto
+        if unicodedata.category(c) != "Mn"
+    )
+
+    # Remove pontuação
+    texto = re.sub(r"[^\w\s]", " ", texto)
+
+    # Remove espaços duplicados
+    texto = re.sub(r"\s+", " ", texto)
+
+    return texto.strip()
+
+
+def _tokenizar_comparacao(texto):
+    """Normaliza e quebra em palavras — usado pela comparação por token."""
+    texto_normalizado = _normalizar_texto_comparacao(texto)
+    if not texto_normalizado:
+        return []
+    return texto_normalizado.split()
+
+
+def _similaridade_texto(texto_a, texto_b):
+    """
+    Retorna uma similaridade entre 0 e 1.
+    1.0 = textos praticamente iguais
+    0.0 = textos completamente diferentes
+
+    Antes comparava caractere a caractere (SequenceMatcher sobre a string
+    inteira), o que penaliza demais pequenas diferenças de transcrição
+    entre canais (ex: uma palavra ouvida com uma letra diferente por causa
+    do vazamento de áudio de um mic para o outro). Agora combina duas
+    métricas calculadas por PALAVRA:
+
+    - SequenceMatcher.ratio() sobre a lista de tokens: mede o quanto as
+      falas se alinham NA MESMA ORDEM — boa para frases quase idênticas
+      com pequenas trocas de palavra.
+    - Jaccard (interseção / união dos conjuntos de palavras): mede o
+      quanto o VOCABULÁRIO é parecido, mesmo com ordem diferente — útil
+      quando o Whisper transcreve as mesmas palavras em ordem levemente
+      diferente entre os dois canais.
+
+    A média das duas é mais tolerante a esse tipo de variação do que
+    comparar caractere a caractere, sem exigir um texto idêntico.
+    """
+    tokens_a = _tokenizar_comparacao(texto_a)
+    tokens_b = _tokenizar_comparacao(texto_b)
+
+    if not tokens_a or not tokens_b:
+        return 0.0
+
+    ratio_sequencial = SequenceMatcher(None, tokens_a, tokens_b).ratio()
+
+    conjunto_a, conjunto_b = set(tokens_a), set(tokens_b)
+    uniao = conjunto_a | conjunto_b
+    jaccard = len(conjunto_a & conjunto_b) / len(uniao) if uniao else 0.0
+
+    return (ratio_sequencial + jaccard) / 2
+
+
+def _calcular_sobreposicao(inicio_a, fim_a, inicio_b, fim_b):
+    """
+    Calcula quanto dois segmentos se sobrepõem.
+
+    Retorna um valor entre 0 e 1 baseado no menor segmento.
+
+    Exemplo:
+
+    A = 10s -> 20s
+    B = 12s -> 18s
+
+    Sobreposição = 6s
+    Menor segmento = 6s
+    Resultado = 1.0
+    """
+
+    inicio_sobreposicao = max(inicio_a, inicio_b)
+    fim_sobreposicao = min(fim_a, fim_b)
+
+    if fim_sobreposicao <= inicio_sobreposicao:
+        return 0.0
+
+    duracao_sobreposicao = (
+        fim_sobreposicao - inicio_sobreposicao 
+    )
+
+    duracao_a = fim_a - inicio_a
+    duracao_b = fim_b - inicio_b
+
+    menor_duracao = min(duracao_a, duracao_b)
+
+    if menor_duracao <= 0:
+        return 0.0
+
+    return duracao_sobreposicao / menor_duracao
+
+
+def _comparar_falas_estereo(
+    segmentos_esquerda,
+    segmentos_direita,
+    limite_sobreposicao=0.70,
+    limite_similaridade=0.80
+):
+    """
+    Compara as falas dos canais esquerdo e direito.
+
+    A função procura segmentos que:
+
+    1. Acontecem praticamente no mesmo momento;
+    2. Possuem texto muito semelhante.
+
+    Quando os dois critérios são atendidos,
+    considera-se que provavelmente é a mesma fala
+    captada pelos dois canais.
+
+    O canal esquerdo é usado como referência quando
+    os dois segmentos são considerados duplicados.
+    """
+
+    resultado_esquerda = []
+    resultado_direita = []
+
+    # ---------------------------------------------------------
+    # COPIA OS SEGMENTOS PARA NÃO ALTERAR OS ORIGINAIS
+    # ---------------------------------------------------------
+
+    for segmento in segmentos_esquerda:
+
+        novo_segmento = segmento.copy()
+
+        novo_segmento["canal"] = "L"
+        novo_segmento["duplicado"] = False
+        novo_segmento["similaridade"] = 0.0
+        novo_segmento["sobreposicao"] = 0.0
+
+        resultado_esquerda.append(novo_segmento)
+
+    for segmento in segmentos_direita:
+
+        novo_segmento = segmento.copy()
+
+        novo_segmento["canal"] = "R"
+        novo_segmento["duplicado"] = False
+        novo_segmento["similaridade"] = 0.0
+        novo_segmento["sobreposicao"] = 0.0
+
+        resultado_direita.append(novo_segmento)
+
+    # ---------------------------------------------------------
+    # COMPARA L CONTRA R
+    # ---------------------------------------------------------
+
+    for segmento_l in resultado_esquerda:
+
+        melhor_correspondencia = None
+        melhor_score = 0.0
+
+        for segmento_r in resultado_direita:
+
+            # ---------------------------------------------
+            # SOBREPOSIÇÃO TEMPORAL
+            # ---------------------------------------------
+
+            sobreposicao = _calcular_sobreposicao(
+                segmento_l["inicio"],
+                segmento_l["fim"],
+                segmento_r["inicio"],
+                segmento_r["fim"]
+            )
+
+            # Se praticamente não existe sobreposição,
+            # não faz sentido comparar como duplicação.
+            if sobreposicao < limite_sobreposicao:
+                continue
+
+            # ---------------------------------------------
+            # SIMILARIDADE DO TEXTO
+            # ---------------------------------------------
+
+            similaridade = _similaridade_texto(
+                segmento_l.get("texto", ""),
+                segmento_r.get("texto", "")
+            )
+
+            if similaridade < limite_similaridade:
+                continue
+
+            # ---------------------------------------------
+            # SCORE FINAL
+            # ---------------------------------------------
+
+            score = (
+                sobreposicao * 0.5
+                +
+                similaridade * 0.5
+            )
+
+            if score > melhor_score:
+
+                melhor_score = score
+
+                melhor_correspondencia = {
+                    "segmento": segmento_r,
+                    "sobreposicao": sobreposicao,
+                    "similaridade": similaridade,
+                    "score": score
+                }
+
+        # -----------------------------------------------------
+        # ENCONTROU UMA DUPLICAÇÃO
+        # -----------------------------------------------------
+
+        if melhor_correspondencia:
+
+            segmento_r = melhor_correspondencia["segmento"]
+
+            sobreposicao = melhor_correspondencia["sobreposicao"]
+            similaridade = melhor_correspondencia["similaridade"]
+
+            segmento_l["sobreposicao"] = sobreposicao
+            segmento_l["similaridade"] = similaridade
+
+            segmento_r["sobreposicao"] = sobreposicao
+            segmento_r["similaridade"] = similaridade
+
+            # -------------------------------------------------
+            # DECISÃO
+            #
+            # Mantemos L
+            # Anulamos R
+            # -------------------------------------------------
+
+            segmento_r["duplicado"] = True
+
+    # ---------------------------------------------------------
+    # JUNTA OS RESULTADOS
+    # ---------------------------------------------------------
+
+    resultado = (
+        resultado_esquerda
+        +
+        resultado_direita
+    )
+
+    # Ordena cronologicamente
+    resultado.sort(
+        key=lambda x: x.get("inicio", 0)
+    )
+
+    return resultado
+
+
+def _remover_duplicatas_multicanal(
+    resultados_por_canal,
+    limite_sobreposicao=0.70,
+    limite_similaridade=0.80
+):
+    """
+    Trata cada canal do MULTICANAL como independente — nenhum canal é
+    fixado como "primário"/referência. Compara TODOS os pares de canais
+    entre si (canal 0 x 1, 0 x 2, 1 x 2, etc.), usando o mesmo critério
+    de sobreposição temporal + similaridade de texto já usado no estéreo.
+
+    Quando dois segmentos de canais DIFERENTES são considerados a mesma
+    fala (duplicata), a decisão de qual manter NÃO é pelo índice do canal
+    (ex: "canal 0 sempre vence") — é pelo "primeiro falante": mantém-se o
+    segmento cujo "inicio" é mais cedo no tempo, e marca-se o outro (que
+    começou depois) como duplicado, não importa em qual canal ele esteja.
+
+    Recebe `resultados_por_canal`: lista de dicionários no formato
+    {"segmentos": [...]}, um por canal, na ordem dos canais (índice 0..N-1).
+
+    Retorna uma lista única com os segmentos de todos os canais, cada um
+    marcado com "canal" (ex: "C0", "C1", ...) e "duplicado" (True/False).
+    """
+    todos_segmentos = []
+    for indice_canal, resultado_canal in enumerate(resultados_por_canal):
+        for segmento in resultado_canal["segmentos"]:
+            novo_segmento = segmento.copy()
+            novo_segmento["canal"] = f"C{indice_canal}"
+            novo_segmento["_canal_idx"] = indice_canal  # uso interno, removido no final
+            novo_segmento["duplicado"] = False
+            novo_segmento["similaridade"] = 0.0
+            novo_segmento["sobreposicao"] = 0.0
+            todos_segmentos.append(novo_segmento)
+
+    total_segmentos = len(todos_segmentos)
+
+    # ---------------------------------------------------------
+    # COMPARAÇÃO PAR A PAR ENTRE TODOS OS CANAIS (não só contra um "primário")
+    # ---------------------------------------------------------
+    for i in range(total_segmentos):
+        segmento_a = todos_segmentos[i]
+
+        # Se este segmento já foi marcado como duplicado por uma
+        # comparação anterior, ele não pode mais "vencer" outra —
+        # já foi descartado, pula.
+        if segmento_a["duplicado"]:
+            continue
+
+        for j in range(i + 1, total_segmentos):
+            segmento_b = todos_segmentos[j]
+
+            # Só compara canais DIFERENTES — o mesmo canal nunca duplica
+            # fala consigo mesmo.
+            if segmento_a["_canal_idx"] == segmento_b["_canal_idx"]:
+                continue
+
+            if segmento_b["duplicado"]:
+                continue
+
+            sobreposicao = _calcular_sobreposicao(
+                segmento_a["inicio"], segmento_a["fim"],
+                segmento_b["inicio"], segmento_b["fim"]
+            )
+            if sobreposicao < limite_sobreposicao:
+                continue
+
+            similaridade = _similaridade_texto(
+                segmento_a.get("texto", ""), segmento_b.get("texto", "")
+            )
+            if similaridade < limite_similaridade:
+                continue
+
+            # ---------------------------------------------
+            # DUPLICATA CONFIRMADA — decide pelo "primeiro falante"
+            # (quem começou a falar primeiro no tempo), não pelo canal.
+            # ---------------------------------------------
+            segmento_a["sobreposicao"] = sobreposicao
+            segmento_a["similaridade"] = similaridade
+            segmento_b["sobreposicao"] = sobreposicao
+            segmento_b["similaridade"] = similaridade
+
+            if segmento_a["inicio"] <= segmento_b["inicio"]:
+                # A começou primeiro (ou empatou) -> mantém A, descarta B
+                segmento_b["duplicado"] = True
+            else:
+                # B começou primeiro -> mantém B, descarta A
+                segmento_a["duplicado"] = True
+                break  # A virou duplicado; não faz sentido compará-lo com mais ninguém
+
+    for segmento in todos_segmentos:
+        segmento.pop("_canal_idx", None)
+
+    return todos_segmentos
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +907,163 @@ def _diarizar_audio(caminho_wav):
 
 
 # ---------------------------------------------------------------------------
+# HEURÍSTICAS DE DETECÇÃO DE "FALA FANTASMA" (alucinação do Whisper)
+# ---------------------------------------------------------------------------
+# O Whisper (e por extensão o whisper-large-v3-turbo servido pela Groq) é
+# conhecido por "alucinar" texto em trechos sem fala real — silêncio, ruído
+# de fundo, música — porque foi treinado com muitos vídeos do YouTube que
+# terminam com frases padrão desse tipo. O caso clássico é justamente
+# "Thank you.", mas existem várias variações (PT-BR incluído).
+#
+# A detecção combina duas fontes de evidência:
+# 1. Métricas do próprio Whisper por segmento (no_speech_prob, avg_logprob,
+#    compression_ratio) — sinais clássicos de baixa confiança/alucinação.
+# 2. Cruzamento com o VAD (energia de voz) já calculado no pipeline: se o
+#    trecho "falado" cai quase todo fora de onde o VAD identificou fala de
+#    verdade, é forte indício de que não há fala ali.
+LIMIAR_NO_SPEECH_PROB = 0.6
+LIMIAR_AVG_LOGPROB = -1.0
+LIMIAR_COMPRESSION_RATIO = 2.4
+
+FRASES_ALUCINACAO_CONHECIDAS = {
+    "thank you",
+    "thank you very much",
+    "thanks for watching",
+    "thank you for watching",
+    "please subscribe",
+    "subscribe to the channel",
+    "obrigado por assistir",
+    "se inscreva no canal",
+    "inscreva se no canal",
+    "curta e compartilhe",
+    "ate a proxima",
+    "legendas pela comunidade amara org",
+    "subtitles by the amara org community",
+    "www amara org",
+}
+
+
+def _tempo_sobreposto_com_vad(inicio, fim, intervalos_fala, sr):
+    """
+    Soma quanto tempo (em segundos) do trecho [inicio, fim] cai dentro de
+    algum intervalo de fala detectado pelo VAD. `intervalos_fala` vem de
+    _detectar_intervalos_fala, em AMOSTRAS — por isso recebe `sr` para
+    converter para segundos antes de comparar com inicio/fim (que já vêm
+    em segundos, do Whisper).
+    """
+    if intervalos_fala is None or sr is None or len(intervalos_fala) == 0:
+        return None
+
+    sobreposicao_total = 0.0
+    for ini_amostra, fim_amostra in intervalos_fala:
+        ini_s, fim_s = ini_amostra / sr, fim_amostra / sr
+        inicio_sobre = max(inicio, ini_s)
+        fim_sobre = min(fim, fim_s)
+        if fim_sobre > inicio_sobre:
+            sobreposicao_total += (fim_sobre - inicio_sobre)
+
+    return sobreposicao_total
+
+
+def _segmento_e_provavel_alucinacao(segmento, intervalos_fala=None, sr=None):
+    """
+    Decide se um segmento do Whisper é provavelmente uma "fala fantasma".
+    Não descarta com base em UMA evidência fraca isolada — combina
+    métricas do modelo com o cruzamento contra o VAD sempre que possível,
+    para não arriscar apagar fala real por engano.
+    """
+    texto = _campo(segmento, 'text', '') or ''
+    texto_norm = _normalizar_texto_comparacao(texto)
+
+    no_speech_prob = _campo(segmento, 'no_speech_prob')
+    avg_logprob = _campo(segmento, 'avg_logprob')
+    compression_ratio = _campo(segmento, 'compression_ratio')
+    inicio = _campo(segmento, 'start')
+    fim = _campo(segmento, 'end')
+
+    suspeita_por_metricas = False
+    if no_speech_prob is not None and avg_logprob is not None:
+        suspeita_por_metricas = (
+            no_speech_prob > LIMIAR_NO_SPEECH_PROB and avg_logprob < LIMIAR_AVG_LOGPROB
+        )
+    if compression_ratio is not None and compression_ratio > LIMIAR_COMPRESSION_RATIO:
+        suspeita_por_metricas = True
+
+    suspeita_por_frase_conhecida = texto_norm in FRASES_ALUCINACAO_CONHECIDAS
+
+    if not (suspeita_por_metricas or suspeita_por_frase_conhecida):
+        return False
+
+    if inicio is None or fim is None:
+        # Sem tempo não dá pra cruzar com o VAD; exige as duas evidências
+        # ao mesmo tempo antes de descartar, por segurança.
+        return suspeita_por_metricas and suspeita_por_frase_conhecida
+
+    duracao = fim - inicio
+    sobreposicao_vad = _tempo_sobreposto_com_vad(inicio, fim, intervalos_fala, sr)
+
+    if sobreposicao_vad is not None and duracao > 0:
+        proporcao_vad = sobreposicao_vad / duracao
+        if proporcao_vad < 0.3:
+            print(f"    [FALA FANTASMA] Descartando trecho suspeito: "
+                  f"'{texto.strip()}' ({inicio:.2f}s-{fim:.2f}s, "
+                  f"{proporcao_vad * 100:.0f}% de sobreposição com VAD)", flush=True)
+            return True
+
+    # Sem VAD para cruzar (ou sobreposição já alta): só descarta se as
+    # duas evidências baterem ao mesmo tempo.
+    if suspeita_por_metricas and suspeita_por_frase_conhecida:
+        print(f"    [FALA FANTASMA] Descartando trecho suspeito (métricas + frase conhecida): "
+              f"'{texto.strip()}'", flush=True)
+        return True
+
+    return False
+
+
+def _filtrar_falas_fantasma(palavras, segmentos_whisper, intervalos_fala=None, sr=None):
+    """
+    Remove da lista de palavras transcritas (word-level) aquelas que
+    pertencem a um segmento do Whisper identificado como provável
+    alucinação. Roda ANTES da combinação com a diarização, para que a
+    fala fantasma nunca chegue a virar um bloco de fala "de verdade".
+    """
+    if not segmentos_whisper:
+        return palavras
+
+    segmentos_para_descartar = []
+    for segmento in segmentos_whisper:
+        inicio = _campo(segmento, 'start')
+        fim = _campo(segmento, 'end')
+        if inicio is None or fim is None:
+            continue
+        if _segmento_e_provavel_alucinacao(segmento, intervalos_fala, sr):
+            segmentos_para_descartar.append((inicio, fim))
+
+    if not segmentos_para_descartar:
+        return palavras
+
+    palavras_filtradas = []
+    for palavra in palavras:
+        inicio_p = _campo(palavra, 'start')
+        fim_p = _campo(palavra, 'end')
+        dentro_de_trecho_descartado = (
+            inicio_p is not None and fim_p is not None and any(
+                inicio_p >= ini_seg - 0.05 and fim_p <= fim_seg + 0.05
+                for ini_seg, fim_seg in segmentos_para_descartar
+            )
+        )
+        if not dentro_de_trecho_descartado:
+            palavras_filtradas.append(palavra)
+
+    total_removidas = len(palavras) - len(palavras_filtradas)
+    if total_removidas:
+        print(f"    [FALA FANTASMA] {total_removidas} palavra(s) removida(s) por pertencer(em) "
+              f"a trecho(s) identificado(s) como alucinação.", flush=True)
+
+    return palavras_filtradas
+
+
+# ---------------------------------------------------------------------------
 # TRANSCRIÇÃO COM TIMESTAMPS POR PALAVRA (Groq)
 # ---------------------------------------------------------------------------
 def _transcrever_com_timestamps(audio_path):
@@ -262,7 +1074,8 @@ def _transcrever_com_timestamps(audio_path):
             response_format="verbose_json",
             timestamp_granularities=["word", "segment"]
         )
-    return resposta.words
+    segmentos_whisper = getattr(resposta, "segments", None) or []
+    return resposta.words, segmentos_whisper
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +1122,143 @@ def _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao):
     })
 
     return blocos
+
+
+# ---------------------------------------------------------------------------
+# PROCESSAMENTO DE UM CANAL (usado no ESTÉREO/MULTICANAL — cada canal
+# processado de forma independente)
+# ---------------------------------------------------------------------------
+def _processar_canal_audio(caminho_audio, intervalos_fala=None, sr=None):
+    """
+    Roda diarização + transcrição + combinação para UM canal de áudio
+    já normalizado (sem cortar silêncio — os timestamps continuam
+    correspondendo ao áudio original, o que é necessário para a
+    comparação entre canais funcionar corretamente).
+
+    `intervalos_fala`/`sr` (do VAD já calculado sobre esse mesmo canal)
+    são opcionais e usados só para cruzar com a checagem de "fala
+    fantasma" — se não forem passados, a checagem cai para o modo mais
+    conservador (só descarta quando as métricas do Whisper E uma frase
+    conhecida batem ao mesmo tempo).
+
+    Retorna um dicionário com a lista de segmentos (blocos de fala)
+    desse canal, no mesmo formato usado pelo caminho mono.
+    """
+    segmentos_falantes = _diarizar_audio(caminho_audio)
+    palavras_transcricao, segmentos_whisper = _transcrever_com_timestamps(caminho_audio)
+    palavras_transcricao = _filtrar_falas_fantasma(palavras_transcricao, segmentos_whisper, intervalos_fala, sr)
+    segmentos = _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao)
+    return {"segmentos": segmentos}
+
+
+def _processar_um_canal_multicanal(caminho_canal, top_db):
+    """
+    Estágio "processamento" de UM canal do MULTICANAL (roda em paralelo
+    para cada C0, C1, ..., CN): normaliza (two-pass), roda a análise de
+    qualidade sobre o áudio normalizado, detecta intervalos de fala (usado
+    tanto para log/diagnóstico quanto para a checagem de fala fantasma) e
+    roda diarização + transcrição.
+    Retorna os segmentos desse canal, o relatório de qualidade, o caminho
+    do arquivo normalizado e os intervalos de fala (log/diagnóstico).
+    """
+    caminho_normalizado = caminho_canal.rsplit('.', 1)[0] + '_normalizado.wav'
+    _normalizar_mono_two_pass(caminho_canal, caminho_normalizado)
+    relatorio_qualidade = _analisar_qualidade_audio(caminho_normalizado, rotulo=os.path.basename(caminho_canal))
+    intervalos_fala, sr = _detectar_intervalos_fala(caminho_normalizado, top_db)
+    resultado_canal = _processar_canal_audio(caminho_normalizado, intervalos_fala, sr)
+    return {
+        "caminho_normalizado": caminho_normalizado,
+        "intervalos_fala": intervalos_fala,
+        "segmentos": resultado_canal["segmentos"],
+        "qualidade": relatorio_qualidade,
+    }
+
+
+def _pipeline_multicanal(wav_lossless_path, canais, top_db, base_nomes):
+    """
+    Pipeline completo do MULTICANAL, em estágios explícitos:
+
+        MULTICANAL
+            |
+      C0  C1  C2 ... CN        <- separar canais
+            |
+        processamento          <- por canal, em paralelo (normalizar + análise de
+            |                       qualidade + VAD + diarizar/transcrever, já
+            |                       filtrando fala fantasma)
+            |
+   comparação entre canais     <- todos os pares, sem canal fixo como referência
+            |
+    remover apenas duplicatas  <- mantém quem começou a falar primeiro
+            |
+       resultado final         <- correção de texto + nomes próprios
+
+    Retorna (resultado, qualidade_multicanal, canais_multicanal_paths,
+    canais_normalizados_paths) — os dois últimos são devolvidos só para o
+    chamador poder limpar os arquivos temporários depois.
+    """
+    # --- ESTÁGIO 1: SEPARAR CANAIS (C0, C1, C2, ..., CN) ---
+    rotulos_canais = ", ".join(f"C{i}" for i in range(canais))
+    print(f"[5/10] [MULTICANAL] Separando em {canais} canais: {rotulos_canais}")
+    canais_multicanal_paths = _separar_canais_multicanal(wav_lossless_path, canais)
+    print(f"[5/10] [MULTICANAL] Canais separados: {canais_multicanal_paths}")
+
+    # --- ESTÁGIO 2: PROCESSAMENTO (por canal, em paralelo) ---
+    # Cada canal é tratado de forma totalmente independente: normalização
+    # two-pass, análise de qualidade, VAD (informativo + checagem de
+    # alucinação) e diarização+transcrição.
+    print(f"[6-8/10] [MULTICANAL] Processando os {canais} canais em paralelo "
+          f"(normalização two-pass + qualidade + VAD + diarização/transcrição)...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=canais) as executor:
+        futuros = [
+            executor.submit(_processar_um_canal_multicanal, caminho, top_db)
+            for caminho in canais_multicanal_paths
+        ]
+        processados = [futuro.result() for futuro in futuros]
+
+    canais_normalizados_paths = [p["caminho_normalizado"] for p in processados]
+    resultados_por_canal = [{"segmentos": p["segmentos"]} for p in processados]
+    qualidade_multicanal = [p["qualidade"] for p in processados]
+
+    for i, p in enumerate(processados):
+        print(f"    C{i}: {len(p['intervalos_fala'])} intervalos de fala, "
+              f"{len(p['segmentos'])} segmentos de fala transcritos.")
+
+    # --- ESTÁGIO 3: COMPARAÇÃO ENTRE CANAIS ---
+    # Nenhum canal é "primário"/referência fixa — compara todos os pares
+    # entre si (C0xC1, C0xC2, C1xC2, ...).
+    print(f"[9/10] [MULTICANAL] Comparando todos os canais entre si "
+          f"(sem canal fixo como referência)...")
+    segmentos_comparados = _remover_duplicatas_multicanal(
+        resultados_por_canal, limite_sobreposicao=0.70, limite_similaridade=0.80
+    )
+
+    # --- ESTÁGIO 4: REMOVER APENAS DUPLICATAS ---
+    # Mantém sempre o segmento cujo falante começou a falar primeiro no
+    # tempo, independente do índice do canal.
+    resultado_combinado = [
+        s for s in segmentos_comparados if not s.get("duplicado", False)
+    ]
+    total_duplicadas = len(segmentos_comparados) - len(resultado_combinado)
+    print(f"[9/10] [MULTICANAL] Duplicatas removidas: {total_duplicadas} "
+          f"(mantendo sempre quem começou a falar primeiro)")
+    resultado_combinado.sort(key=lambda s: (s.get("inicio", 0), s.get("fim", 0)))
+
+    # --- ESTÁGIO 5: RESULTADO FINAL (correção de texto + nomes próprios) ---
+    print(f"[10/10] [MULTICANAL] Corrigindo pontuação, capitalização e termos técnicos (LLM)...")
+    resultado = _corrigir_blocos(resultado_combinado)
+
+    print(f"[10/10] [MULTICANAL] Consultando nomes próprios conhecidos (IBGE)...")
+    if base_nomes is None:
+        base_nomes = _obter_ranking_nomes_ibge(quantidade=100)
+    for bloco in resultado:
+        bloco["texto_corrigido"] = _consultar_nomes_proprios(bloco["texto_corrigido"], base_nomes)
+
+    print("\n--- RESULTADO FINAL (MULTICANAL) ---")
+    for item in resultado:
+        print(f"[{item['inicio']}s - {item['fim']}s] canal={item.get('canal')} "
+              f"{item['falante']}: {item['texto_corrigido']}")
+
+    return resultado, qualidade_multicanal, canais_multicanal_paths, canais_normalizados_paths
 
 
 # ---------------------------------------------------------------------------
@@ -417,7 +1367,12 @@ def _consultar_nomes_proprios(texto, base_nomes, limiar_similaridade=0.75):
 # PIPELINE PRINCIPAL
 # ---------------------------------------------------------------------------
 def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
-    """Recebe um caminho de arquivo já existente em disco e retorna a transcrição com falantes."""
+    """
+    Recebe um caminho de arquivo já existente em disco e retorna um
+    dicionário {"segmentos": [...], "qualidade": [...]} — "qualidade" traz
+    um relatório de diagnóstico por canal normalizado (vazio quando o
+    fluxo não passa por normalização, como no fallback de WAV puro).
+    """
     extensao = os.path.splitext(caminho_original)[1].lower()
     print(f"[1/10] Copiando arquivo temporário...")
 
@@ -429,15 +1384,16 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
     wav_lossless_path = None
     normalizado_path = None
     sem_silencio_path = None
-    # --- Novos temporários, usados só no caminho ESTÉREO (separação + paralelo) ---
+
+    # --- Temporários específicos do processamento estéreo ---
     canal_esq_path = None
     canal_dir_path = None
     normalizado_esq_path = None
     normalizado_dir_path = None
-    sem_silencio_esq_path = None
-    sem_silencio_dir_path = None
-    sem_silencio_esq_path = None
-    sem_silencio_dir_path = None
+
+    # --- Temporários específicos do processamento multicanal (N canais) ---
+    canais_multicanal_paths = None
+    canais_normalizados_paths = None
 
     try:
         print(f"[2/10] Verificando duração do arquivo recebido...")
@@ -474,9 +1430,6 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
                 print(f"[5/10] Canais separados: {canal_esq_path} | {canal_dir_path}")
 
                 # --- Normalização EBU R128 dos dois canais EM PARALELO (multitarefa) ---
-                # Cada canal separado já é mono, então usa o mesmo normalizador
-                # single-pass que o caminho MONO original usa — só que rodando
-                # os dois ao mesmo tempo, em threads separadas.
                 print(f"[6/10] Normalizando os dois canais em paralelo (EBU R128 single-pass, multitarefa)...")
                 normalizado_esq_path = tmp_path.rsplit('.', 1)[0] + '_esq_normalizado.wav'
                 normalizado_dir_path = tmp_path.rsplit('.', 1)[0] + '_dir_normalizado.wav'
@@ -488,81 +1441,102 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
                     futuro_dir = executor.submit(
                         _normalizar_mono_single_pass, canal_dir_path, normalizado_dir_path
                     )
-                    futuro_esq.result()  # propaga exceção, se houver, de qualquer uma das duas threads
+                    futuro_esq.result()
                     futuro_dir.result()
 
                 print(f"[6/10] Normalização concluída em paralelo para os dois canais.")
                 print(f"    Canal esquerdo normalizado: {normalizado_esq_path}")
                 print(f"    Canal direito normalizado: {normalizado_dir_path}")
 
-                # --- Enquadramento + remoção de silêncio dos dois canais EM PARALELO ---
-                # Mesma lógica de multitarefa da normalização: cada canal já é mono,
-                # então usa a mesma função _enquadrar_e_remover_silencio do caminho
-                # mono/multicanal, só que os dois rodando ao mesmo tempo.
-                print(f"[7/10] Enquadrando e removendo silêncio dos dois canais em paralelo "
-                      f"(VAD por energia, 25ms/10ms, top_db={top_db}, multitarefa)...")
-                sem_silencio_esq_path = tmp_path.rsplit('.', 1)[0] + '_esq_final.wav'
-                sem_silencio_dir_path = tmp_path.rsplit('.', 1)[0] + '_dir_final.wav'
+                # --- Análise de qualidade dos dois canais normalizados ---
+                print(f"[6/10] Analisando qualidade dos canais normalizados...")
+                relatorio_qualidade_esq = _analisar_qualidade_audio(normalizado_esq_path, rotulo="esquerdo")
+                relatorio_qualidade_dir = _analisar_qualidade_audio(normalizado_dir_path, rotulo="direito")
+                relatorios_qualidade_estereo = [relatorio_qualidade_esq, relatorio_qualidade_dir]
+
+                # --- VAD informativo (NÃO corta o áudio) dos dois canais, em paralelo ---
+                # Além de diagnóstico (quantos trechos de fala existem), os
+                # intervalos também alimentam a checagem de fala fantasma —
+                # a diarização/transcrição roda sobre o áudio normalizado
+                # completo (sem cortes), preservando os timestamps originais.
+                print(f"[7/10] Detectando intervalos de fala nos dois canais em paralelo "
+                      f"(VAD informativo, NÃO corta o áudio, top_db={top_db})...")
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                    futuro_esq = executor.submit(
-                        _enquadrar_e_remover_silencio, normalizado_esq_path, sem_silencio_esq_path, top_db
-                    )
-                    futuro_dir = executor.submit(
-                        _enquadrar_e_remover_silencio, normalizado_dir_path, sem_silencio_dir_path, top_db
-                    )
-                    futuro_esq.result()
-                    futuro_dir.result()
+                    futuro_vad_esq = executor.submit(_detectar_intervalos_fala, normalizado_esq_path, top_db)
+                    futuro_vad_dir = executor.submit(_detectar_intervalos_fala, normalizado_dir_path, top_db)
+                    intervalos_esq, sr_esq = futuro_vad_esq.result()
+                    intervalos_dir, sr_dir = futuro_vad_dir.result()
 
-                print(f"[7/10] VAD concluído em paralelo para os dois canais.")
-                print(f"    Canal esquerdo (sem silêncio): {sem_silencio_esq_path}")
-                print(f"    Canal direito (sem silêncio): {sem_silencio_dir_path}")
+                print(f"[7/10] VAD concluído: canal esquerdo com {len(intervalos_esq)} intervalos de fala, "
+                      f"canal direito com {len(intervalos_dir)} intervalos de fala.")
 
-                # ------------------------------------------------------------------
-                # PONTO DE PARADA DESTA ETAPA (combinado com você):
-                # a diarização e a transcrição ainda não foram adaptadas para
-                # rodar sobre os dois canais separados. Isso fica para a
-                # próxima etapa da revisão. Por ora, retornamos aqui com os dois
-                # caminhos já sem silêncio, sem quebrar o fluxo de mono/multicanal.
-                # ------------------------------------------------------------------
-                print("\n[AVISO] Estratégia ESTÉREO implementada até o enquadramento/VAD (separação + processamento paralelo).")
-                print("[AVISO] Próxima etapa: adaptar diarização/transcrição para os dois canais separados.")
-                return {
-                    "tipo_canal": "estereo",
-                    "canal_esquerdo_final": sem_silencio_esq_path,
-                    "canal_direito_final": sem_silencio_dir_path
-                }
+                # --- Diarização + transcrição de cada canal, EM PARALELO ---
+                # (já filtra fala fantasma internamente, cruzando com o VAD)
+                print(f"[8/10] Diarizando e transcrevendo os dois canais em paralelo...")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    futuro_esq = executor.submit(_processar_canal_audio, normalizado_esq_path, intervalos_esq, sr_esq)
+                    futuro_dir = executor.submit(_processar_canal_audio, normalizado_dir_path, intervalos_dir, sr_dir)
+                    resultado_esq = futuro_esq.result()
+                    resultado_dir = futuro_dir.result()
+
+                segmentos_esq = resultado_esq["segmentos"]
+                segmentos_dir = resultado_dir["segmentos"]
+                print(f"[8/10] Segmentos encontrados — esquerdo: {len(segmentos_esq)}, direito: {len(segmentos_dir)}")
+
+                # --- Compara L x R para eliminar duplicação (mesma fala captada nos dois canais) ---
+                print(f"[9/10] Comparando canais para remover falas duplicadas...")
+                segmentos_comparados = _comparar_falas_estereo(
+                    segmentos_esq, segmentos_dir,
+                    limite_sobreposicao=0.70, limite_similaridade=0.80
+                )
+
+                segmentos_sem_duplicacao = [
+                    s for s in segmentos_comparados if not s.get("duplicado", False)
+                ]
+                quantidade_duplicadas = len(segmentos_comparados) - len(segmentos_sem_duplicacao)
+                print(f"[9/10] Duplicações removidas: {quantidade_duplicadas}")
+
+                segmentos_sem_duplicacao.sort(key=lambda s: (s.get("inicio", 0), s.get("fim", 0)))
+
+                # --- Correção de texto (mesma etapa do caminho mono/multicanal) ---
+                print(f"[10/10] Corrigindo pontuação, capitalização e termos técnicos (LLM)...")
+                resultado = _corrigir_blocos(segmentos_sem_duplicacao)
+
+                print(f"[10/10] Consultando nomes próprios conhecidos (IBGE)...")
+                if base_nomes is None:
+                    base_nomes = _obter_ranking_nomes_ibge(quantidade=100)
+                for bloco in resultado:
+                    bloco["texto_corrigido"] = _consultar_nomes_proprios(bloco["texto_corrigido"], base_nomes)
+
+                print("\n--- RESULTADO FINAL (ESTÉREO) ---")
+                for item in resultado:
+                    print(f"[{item['inicio']}s - {item['fim']}s] canal={item.get('canal')} "
+                          f"{item['falante']}: {item['texto_corrigido']}")
+
+                return {"segmentos": resultado, "qualidade": relatorios_qualidade_estereo}
+
+            elif tipo_canal == "multicanal":
+                # --- MULTICANAL: pipeline dedicado, em estágios explícitos
+                # (separar canais -> processamento -> comparação entre canais
+                # -> remover apenas duplicatas -> resultado final). Ver
+                # _pipeline_multicanal para o detalhe de cada estágio. ---
+                resultado, qualidade_multicanal, canais_multicanal_paths, canais_normalizados_paths = _pipeline_multicanal(
+                    wav_lossless_path, canais, top_db, base_nomes
+                )
+                return {"segmentos": resultado, "qualidade": qualidade_multicanal}
 
             else:
-                # --- MONO / MULTICANAL: fluxo original, sem separação de canais ---
+                # --- MONO: fluxo original, sem separação de canais ---
                 normalizado_path = tmp_path.rsplit('.', 1)[0] + '_normalizado.wav'
 
-                if tipo_canal == "mono":
-                    print(f"[5/10] Normalizando loudness EBU R128 (single-pass)...")
-                    _normalizar_mono_single_pass(wav_lossless_path, normalizado_path)
-                else:
-                    print(f"[5a/10] Multicanal com {canais} canais — aplicando two-pass...")
-                    print(f"[5a/10] Medindo loudness (passada 1/2)...")
-                    medidas = _medir_loudness(wav_lossless_path)
-                    print(f"[5a/10] Medido: I={medidas['input_i']} LUFS, TP={medidas['input_tp']} dBTP")
-
-                    print(f"[5b/10] Reamostrando 16kHz + normalização precisa (passada 2/2)...")
-                    filtro_preciso = (
-                        f"loudnorm=I=-23:LRA=7:TP=-2:"
-                        f"measured_I={medidas['input_i']}:"
-                        f"measured_LRA={medidas['input_lra']}:"
-                        f"measured_TP={medidas['input_tp']}:"
-                        f"measured_thresh={medidas['input_thresh']}:"
-                        f"offset={medidas['target_offset']}:linear=true"
-                    )
-                    (
-                        ffmpeg.input(wav_lossless_path)
-                        .output(normalizado_path, vn=None, acodec='pcm_s16le', ac=canais,
-                                ar=16000, af=filtro_preciso)
-                        .run(quiet=True, overwrite_output=True)
-                    )
+                print(f"[5/10] Normalizando loudness EBU R128 (single-pass)...")
+                _normalizar_mono_single_pass(wav_lossless_path, normalizado_path)
 
                 print(f"[5/10] WAV normalizado gerado: {normalizado_path}")
+
+                print(f"[5/10] Analisando qualidade do áudio normalizado...")
+                relatorio_qualidade_mono = _analisar_qualidade_audio(normalizado_path, rotulo="mono")
 
                 # --- Enquadramento + remoção de silêncio (sobre o áudio já normalizado) ---
                 print(f"[6/10] Enquadrando e removendo trechos de silêncio (VAD por energia, 25ms/10ms, top_db={top_db})...")
@@ -572,12 +1546,50 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
 
                 audio_path = sem_silencio_path
 
-        print(f"[7/10] Identificando falantes (diarização)...")
+                # VAD sobre o áudio final — usado tanto pro log quanto para
+                # cruzar com a checagem de fala fantasma na transcrição.
+                print(f"[7/10] Identificando falantes (diarização) e detectando intervalos de fala...")
+                segmentos_falantes = _diarizar_audio(audio_path)
+                intervalos_fala_mono, sr_mono = _detectar_intervalos_fala(audio_path, top_db)
+                print(f"[7/10] {len(segmentos_falantes)} segmentos de fala identificados (diarização)")
+
+                print(f"[8/10] Transcrevendo com timestamps por palavra (Groq)...")
+                palavras_transcricao, segmentos_whisper = _transcrever_com_timestamps(audio_path)
+                palavras_transcricao = _filtrar_falas_fantasma(
+                    palavras_transcricao, segmentos_whisper, intervalos_fala_mono, sr_mono
+                )
+
+                resultado = _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao)
+
+                print(f"[9/10] Corrigindo pontuação, capitalização e termos técnicos (LLM)...")
+                resultado = _corrigir_blocos(resultado)
+
+                print(f"[10/10] Consultando nomes próprios conhecidos (IBGE)...")
+                if base_nomes is None:
+                    base_nomes = _obter_ranking_nomes_ibge(quantidade=100)
+                for bloco in resultado:
+                    bloco["texto_corrigido"] = _consultar_nomes_proprios(bloco["texto_corrigido"], base_nomes)
+
+                print("\n--- RESULTADO FINAL ---")
+                for item in resultado:
+                    print(f"[{item['inicio']}s - {item['fim']}s] {item['falante']}: {item['texto_corrigido']}")
+
+                return {"segmentos": resultado, "qualidade": [relatorio_qualidade_mono]}
+
+        # Caso o arquivo não seja .mp4/.mp3 (ex: .wav puro) — fluxo mínimo direto.
+        # Não há etapa de normalização aqui, então não há relatório de qualidade;
+        # ainda assim rodamos o VAD só para poder cruzar com a checagem de
+        # fala fantasma na transcrição.
+        print(f"[7/10] Identificando falantes (diarização) e detectando intervalos de fala...")
         segmentos_falantes = _diarizar_audio(audio_path)
+        intervalos_fala_wav, sr_wav = _detectar_intervalos_fala(audio_path, top_db)
         print(f"[7/10] {len(segmentos_falantes)} segmentos de fala identificados")
 
         print(f"[8/10] Transcrevendo com timestamps por palavra (Groq)...")
-        palavras_transcricao = _transcrever_com_timestamps(audio_path)
+        palavras_transcricao, segmentos_whisper = _transcrever_com_timestamps(audio_path)
+        palavras_transcricao = _filtrar_falas_fantasma(
+            palavras_transcricao, segmentos_whisper, intervalos_fala_wav, sr_wav
+        )
 
         resultado = _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao)
 
@@ -594,7 +1606,7 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
         for item in resultado:
             print(f"[{item['inicio']}s - {item['fim']}s] {item['falante']}: {item['texto_corrigido']}")
 
-        return resultado
+        return {"segmentos": resultado, "qualidade": []}
 
     finally:
         os.remove(tmp_path)
@@ -604,15 +1616,24 @@ def transcrever_arquivo(caminho_original, base_nomes=None, top_db=40):
             os.remove(normalizado_path)
         if sem_silencio_path and os.path.exists(sem_silencio_path):
             os.remove(sem_silencio_path)
-        # Intermediários da separação estéreo (pré-normalização) — sempre removidos
+        # Intermediários da separação estéreo — sempre removidos
         if canal_esq_path and os.path.exists(canal_esq_path):
             os.remove(canal_esq_path)
         if canal_dir_path and os.path.exists(canal_dir_path):
             os.remove(canal_dir_path)
-        # NOTA: normalizado_esq_path / normalizado_dir_path NÃO são removidos aqui —
-        # é justamente esse resultado que a função retorna nesta etapa transitória
-        # (o VAD/diarização/transcrição para o modo estéreo ainda serão implementados
-        # na próxima iteração). Fica a cargo de quem chama limpar esses arquivos depois.
+        if normalizado_esq_path and os.path.exists(normalizado_esq_path):
+            os.remove(normalizado_esq_path)
+        if normalizado_dir_path and os.path.exists(normalizado_dir_path):
+            os.remove(normalizado_dir_path)
+        # Intermediários da separação multicanal (N canais) — sempre removidos
+        if canais_multicanal_paths:
+            for p in canais_multicanal_paths:
+                if p and os.path.exists(p):
+                    os.remove(p)
+        if canais_normalizados_paths:
+            for p in canais_normalizados_paths:
+                if p and os.path.exists(p):
+                    os.remove(p)
 
 
 @app.route('/transcrever', methods=['POST'])
@@ -626,7 +1647,7 @@ def transcrever():
 
     try:
         resultado = transcrever_arquivo(tmp_path)
-        return jsonify({"segmentos": resultado})
+        return jsonify(resultado)  # já vem como {"segmentos": [...], "qualidade": [...]}
     except ValueError as e:
         return jsonify({"erro": str(e)}), 400
     finally:
@@ -692,12 +1713,11 @@ if __name__ == '__main__':
         print("  RESUMO DOS TESTES")
         print(f"{'=' * 70}")
         for nome_arquivo, resultado in resultados.items():
-            if resultado is None:
-                status = "FALHOU"
-            elif isinstance(resultado, dict) and resultado.get("tipo_canal") == "estereo":
-                status = "OK (estéreo — parou na normalização, ver [AVISO] acima)"
+            if resultado is not None:
+                total_alertas = sum(len(q.get('alertas', [])) for q in resultado.get('qualidade', []))
+                status = f"OK ({len(resultado['segmentos'])} blocos, {total_alertas} alerta(s) de qualidade)"
             else:
-                status = f"OK ({len(resultado)} blocos)"
+                status = "FALHOU"
             print(f"  {nome_arquivo}: {status}")
     else:
         app.run(debug=True)
