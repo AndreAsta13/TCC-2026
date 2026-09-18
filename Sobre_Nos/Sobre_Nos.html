@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Equipe — Transcreva.IA</title>
+
+    <!-- TAILWIND CDN + FONTE PLUS JAKARTA SANS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    </style>
+</head>
+
+<body class="bg-[#0b0f19] text-gray-100 min-h-screen flex flex-col justify-between relative overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+
+    <!-- LUZES NEON DE FUNDO -->
+    <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[400px] bg-gradient-to-tr from-indigo-600/20 via-emerald-500/15 to-purple-600/20 blur-[150px] -z-10 pointer-events-none rounded-full"></div>
+    <div class="fixed -bottom-40 -right-40 w-[500px] h-[500px] bg-indigo-900/20 blur-[150px] -z-10 pointer-events-none rounded-full"></div>
+
+    <!-- GRID DECORATIVO DE FUNDO -->
+    <div class="fixed inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
+
+    <!-- HEADER GLASS -->
+    <header class="w-full border-b border-white/10 backdrop-blur-xl bg-[#0b0f19]/70 sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <a href="../index.html" class="flex items-center gap-3 group">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-emerald-400 p-[1px] shadow-lg shadow-indigo-500/20">
+                    <div class="w-full h-full bg-[#0b0f19] rounded-[11px] flex items-center justify-center">
+                        <img src="../Image/image.png" class="w-6 h-6 object-contain group-hover:scale-110 transition-transform" alt="logo" onerror="this.src='https://cdn-icons-png.flaticon.com/512/25/25682.png'">
+                    </div>
+                </div>
+                <span class="text-xl font-extrabold tracking-tight text-white">
+                    Transcreva<span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-emerald-400">.IA</span>
+                </span>
+            </a>
+
+            <a href="../index.html" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-sm px-5 py-2 rounded-xl transition hover:border-indigo-500/50 flex items-center gap-2">
+                ← Voltar
+            </a>
+        </div>
+    </header>
+
+    <!-- CONTEÚDO PRINCIPAL -->
+    <main class="max-w-6xl mx-auto px-6 py-12 flex-1 w-full space-y-12">
+
+        <!-- HERO SECTION -->
+        <section class="text-center space-y-4 max-w-2xl mx-auto">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold uppercase tracking-wider">
+                👥 Quem faz acontecer
+            </div>
+            <h2 class="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
+                Conheça a Equipe
+            </h2>
+            <p class="text-gray-400 text-base sm:text-lg">
+                As mentes e desenvolvedores por trás do Transcreva.IA
+            </p>
+
+            <!-- LINHA DECORATIVA -->
+            <div class="w-24 h-1 bg-gradient-to-r from-indigo-500 to-emerald-400 mx-auto rounded-full pt-0.5"></div>
+        </section>
+
+        <!-- GRID DE MEMBROS DA EQUIPE -->
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+            <!-- CARD 1: André Asta Olivera -->
+            <div class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden flex flex-col justify-between hover:border-indigo-500/50 transition duration-300 group hover:-translate-y-1">
+                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="font-bold text-xl text-white group-hover:text-indigo-300 transition">André Asta Olivera</h3>
+                            <span class="inline-block mt-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold px-3 py-1 rounded-full">
+                                Líder da equipe
+                            </span>
+                        </div>
+                        <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-xl text-indigo-400 font-bold shrink-0">
+                            AO
+                        </div>
+                    </div>
+
+                    <p class="text-gray-300 text-sm leading-relaxed">
+                        Estudante de Desenvolvimento de Software apaixonado por tecnologia e suas possibilidades. Convivo há +20 anos com deficiência auditiva bilateral (atualmente severa-profunda, ~85 dB). Experiência prática com aparelhos auditivos, sistemas FM e tecnologias de acessibilidade fornecidas pela DERDIC e empresas especializadas.
+                    </p>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-white/10 text-xs text-gray-400 space-y-2 bg-black/20 -mx-8 -mb-8 p-6 rounded-b-3xl">
+                    <p class="text-gray-300 font-semibold mb-2">Fiquem à vontade para conversar comigo, estou sempre aberto a novas ideias e colaborações:</p>
+                    <div class="flex flex-col gap-1">
+                        <span class="flex items-center gap-2"><strong class="text-emerald-400">WhatsApp:</strong> (11) 97444-7080</span>
+                        <span class="flex items-center gap-2"><strong class="text-indigo-400">E-mail:</strong> a.asta.oliveira@gmail.com</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARD 2: Victor Hugo Almeida Cruz -->
+            <div class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden flex flex-col justify-between hover:border-indigo-500/50 transition duration-300 group hover:-translate-y-1">
+                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="font-bold text-xl text-white group-hover:text-indigo-300 transition">Victor Hugo Almeida Cruz</h3>
+                            <span class="inline-block mt-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold px-3 py-1 rounded-full">
+                                Desenvolvedor
+                            </span>
+                        </div>
+                        <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-xl text-indigo-400 font-bold shrink-0">
+                            VH
+                        </div>
+                    </div>
+
+                    <p class="text-gray-300 text-sm leading-relaxed">
+                        Estudante de Ciência da Computação, dedicado ao desenvolvimento de software e à evolução constante, buscando aplicar conhecimento em projetos reais.
+                    </p>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-white/10 text-xs text-gray-400 space-y-2 bg-black/20 -mx-8 -mb-8 p-6 rounded-b-3xl">
+                    <span class="flex items-center gap-2"><strong class="text-indigo-400">E-mail:</strong> almeidahugo3001@gmail.com</span>
+                </div>
+            </div>
+
+            <!-- CARD 3: Felipe Jundi Nakao -->
+            <div class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden flex flex-col justify-between hover:border-indigo-500/50 transition duration-300 group hover:-translate-y-1">
+                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="font-bold text-xl text-white group-hover:text-indigo-300 transition">Felipe Jundi Nakao</h3>
+                            <span class="inline-block mt-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold px-3 py-1 rounded-full">
+                                Desenvolvedor / Designer
+                            </span>
+                        </div>
+                        <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-xl text-indigo-400 font-bold shrink-0">
+                            FN
+                        </div>
+                    </div>
+
+                    <p class="text-gray-300 text-sm leading-relaxed">
+                        Estudante de Ciência da Computação, começando minha jornada no mundo da tecnologia e explorando suas diversas possibilidades. Atualmente estou aprendendo na prática e me desafiando, mesmo sendo minha primeira experiência me arriscando em algo novo sem saber tudo — e é isso que torna tudo mais interessante. Gosto de unir desenvolvimento e design para criar soluções funcionais e criativas. Nos momentos livres, curto praticar esportes de todos os tipos, o que me ajuda a manter o foco e a energia no dia a dia.
+                    </p>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-white/10 text-xs text-gray-400 space-y-2 bg-black/20 -mx-8 -mb-8 p-6 rounded-b-3xl">
+                    <p class="text-gray-300 font-semibold mb-2">Fiquem à vontade para conversar comigo, estou sempre aberto a aprender, trocar ideias e colaborar:</p>
+                    <div class="flex flex-col gap-1">
+                        <span class="flex items-center gap-2"><strong class="text-emerald-400">WhatsApp:</strong> (12) 99183-8611</span>
+                        <span class="flex items-center gap-2"><strong class="text-indigo-400">E-mail:</strong> felipenakao22@gmail.com</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CARD 4: Davi de Simoni Ferreira -->
+            <div class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 shadow-2xl relative overflow-hidden flex flex-col justify-between hover:border-indigo-500/50 transition duration-300 group hover:-translate-y-1">
+                <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="font-bold text-xl text-white group-hover:text-indigo-300 transition">Davi de Simoni Ferreira</h3>
+                            <span class="inline-block mt-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold px-3 py-1 rounded-full">
+                                Desenvolvedor
+                            </span>
+                        </div>
+                        <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-xl text-indigo-400 font-bold shrink-0">
+                            DF
+                        </div>
+                    </div>
+
+                    <p class="text-gray-300 text-sm leading-relaxed">
+                        Desenvolvedor focado em projetos de IA, com experiência prática na criação e aplicação de soluções inteligentes.
+                    </p>
+                </div>
+
+                <div class="mt-6 pt-4 border-t border-white/10 text-xs text-gray-400 bg-black/20 -mx-8 -mb-8 p-6 rounded-b-3xl">
+                    <span class="text-gray-400">Focado em Inteligência Artificial & Engenharia de Prompts</span>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="border-t border-white/10 py-6 bg-[#080b12]/50 text-center text-gray-500 text-xs mt-12">
+        <p>© 2026 Transcreva.IA — Projeto Acadêmico (TCC)</p>
+    </footer>
+
+</body>
+</html>
