@@ -1,408 +1,448 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ground Truth — Transcreva.IA</title>
-<link rel="icon" type="image/png" href="../Image/image.png" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="../css/ground.css">
-</head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ground Truth — Transcreva.IA</title>
+    <link rel="icon" type="image/png" href="../Image/image.png" />
+    
+    <!-- TAILWIND CDN + FONTE PLUS JAKARTA SANS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-<script>
-async function carregarUsuario() {
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        
+        /* Utilitários para tabs e estados ocultos */
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .tab.active {
+            background-color: rgba(99, 102, 241, 0.2);
+            color: #ffffff;
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+    </style>
 
-    const token = localStorage.getItem("token");
+    <script>
+    async function carregarUsuario() {
+        const token = localStorage.getItem("token");
 
-    // Se não existe token, volta para o login
-    if (!token) {
-        window.location.href = "login.html";
-        return;
-    }
-
-    try {
-
-        const resposta = await fetch("http://localhost:3000/me", {
-            method: "GET",
-            headers: {
-                "Authorization": "Bearer " + token
-            }
-        });
-
-        const data = await resposta.json();
-
-        if (!resposta.ok || !data.sucesso) {
-            localStorage.removeItem("token");
-            localStorage.removeItem("usuario");
-
+        if (!token) {
             window.location.href = "login.html";
             return;
         }
 
-        console.log("Usuário logado:", data.usuario);
+        try {
+            const resposta = await fetch("http://localhost:3000/me", {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + token
+                }
+            });
 
-        // Mostra o nome do usuário no console
-        console.log("Nome:", data.usuario.nome);
-        console.log("Email:", data.usuario.email);
+            const data = await resposta.json();
 
-    } catch (erro) {
+            if (!resposta.ok || !data.sucesso) {
+                localStorage.removeItem("token");
+                localStorage.removeItem("usuario");
+                window.location.href = "login.html";
+                return;
+            }
 
-        console.error("Erro ao buscar usuário:", erro);
+            console.log("Usuário logado:", data.usuario);
+            console.log("Nome:", data.usuario.nome);
+            console.log("Email:", data.usuario.email);
 
+        } catch (erro) {
+            console.error("Erro ao buscar usuário:", erro);
+        }
     }
-}
-document.addEventListener("DOMContentLoaded", async () => {
-  // 1. Pega o token salvo no navegador
-  const token = localStorage.getItem("token");
 
-  // 2. Se o usuário tentar acessar a tela diretamente sem fazer login, redireciona de volta
-  if (!token) {
-    alert("Você precisa estar logado para acessar esta página.");
-    window.location.href = "cadastro/login.html";
-    return;
-  }
+    document.addEventListener("DOMContentLoaded", async () => {
+        const token = localStorage.getItem("token");
 
-  // 3. Busca os arquivos do usuário logado na rota do backend
-  try {
-    const resposta = await fetch("http://localhost:3000/metadados", {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${token}` // Identifica o usuário logado
-      }
+        if (!token) {
+            alert("Você precisa estar logado para acessar esta página.");
+            window.location.href = "cadastro/login.html";
+            return;
+        }
+
+        try {
+            const resposta = await fetch("http://localhost:3000/metadados", {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            });
+
+            const dados = await resposta.json();
+
+            if (dados.sucesso) {
+                carregarArquivosNaTela(dados.metadados);
+            } else {
+                alert("Sessão expirada. Faça login novamente.");
+                localStorage.removeItem("token");
+                window.location.href = "cadastro/login.html";
+            }
+        } catch (erro) {
+            console.error("Erro ao carregar os dados:", erro);
+        }
     });
 
-    const dados = await resposta.json();
+    function carregarArquivosNaTela(arquivos) {
+        const container = document.getElementById("container-arquivos");
+        if (!container) return;
 
-    if (dados.sucesso) {
-      // 4. Exibe os arquivos e dados de transcrição na tela
-      carregarArquivosNaTela(dados.metadados);
-    } else {
-      // Caso o token seja inválido ou expirado
-      alert("Sessão expirada. Faça login novamente.");
-      localStorage.removeItem("token");
-      window.location.href = "cadastro/login.html";
+        container.innerHTML = "";
+
+        if (arquivos.length === 0) {
+            container.innerHTML = "<p class='text-gray-400 text-sm'>Nenhum arquivo ou transcrição encontrada.</p>";
+            return;
+        }
+
+        arquivos.forEach(item => {
+            container.innerHTML += `
+                <div class="item-transcricao bg-white/5 border border-white/10 rounded-2xl p-4 mb-3">
+                    <h3 class="font-bold text-white text-base">${item.titulo}</h3>
+                    <p class="text-gray-300 text-sm mt-1">${item.descricao}</p>
+                    <small class="text-xs text-indigo-400 mt-2 block">Criado em: ${new Date(item.criado_em).toLocaleDateString()}</small>
+                </div>
+            `;
+        });
     }
-  } catch (erro) {
-    console.error("Erro ao carregar os dados:", erro);
-  }
-});
 
-// Função para inserir os dados no HTML da página ground_truth
-function carregarArquivosNaTela(arquivos) {
-  // Substitua 'container-arquivos' pelo ID do elemento HTML onde você exibe as transcrições
-  const container = document.getElementById("container-arquivos");
-  if (!container) return;
+    carregarUsuario();
+    </script>
+</head>
 
-  container.innerHTML = "";
+<body class="bg-[#0b0f19] text-gray-100 min-h-screen relative overflow-x-hidden selection:bg-indigo-500 selection:text-white">
 
-  if (arquivos.length === 0) {
-    container.innerHTML = "<p>Nenhum arquivo ou transcrição encontrada.</p>";
-    return;
-  }
+    <!-- LUZES NEON DE FUNDO -->
+    <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[500px] bg-gradient-to-tr from-indigo-600/20 via-emerald-500/15 to-purple-600/20 blur-[150px] -z-10 pointer-events-none rounded-full"></div>
+    <div class="fixed bottom-0 right-0 w-[500px] h-[500px] bg-indigo-900/20 blur-[160px] -z-10 pointer-events-none rounded-full"></div>
 
-  arquivos.forEach(item => {
-    container.innerHTML += `
-      <div class="item-transcricao">
-        <h3>${item.titulo}</h3>
-        <p>${item.descricao}</p>
-        <small>Criado em: ${new Date(item.criado_em).toLocaleDateString()}</small>
-      </div>
-    `;
-  });
-}
+    <!-- GRID DECORATIVO -->
+    <div class="fixed inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
 
-carregarUsuario();
-</script>
+    <div id="toast" class="fixed top-5 right-5 z-50"></div>
 
-<body>
+    <!-- HEADER GLASS -->
+    <header class="w-full border-b border-white/10 backdrop-blur-xl bg-[#0b0f19]/70 sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-6">
+                <a href="../index.html" class="flex items-center gap-3 group">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-emerald-400 p-[1px] shadow-lg shadow-indigo-500/20">
+                        <div class="w-full h-full bg-[#0b0f19] rounded-[11px] flex items-center justify-center">
+                            <img src="../Image/image.png" class="w-6 h-6 object-contain group-hover:scale-110 transition-transform" alt="logo" onerror="this.src='https://cdn-icons-png.flaticon.com/512/25/25682.png'">
+                        </div>
+                    </div>
+                    <span class="text-xl font-extrabold tracking-tight text-white">
+                        Transcreva<span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-emerald-400">.IA</span>
+                    </span>
+                </a>
 
-<div id="toast"></div>
+                <nav class="hidden md:flex items-center gap-2 text-sm text-gray-400">
+                    <span>/</span>
+                    <a href="../index.html" class="hover:text-white transition">Início</a>
+                    <span>/</span>
+                    <span class="text-indigo-400 font-semibold">Ground Truth</span>
+                </nav>
+            </div>
 
-<header>
-  <div class="header-inner">
-    <a href="../index.html" class="logo">
-      <img src="../Image/image.png" alt="logo">
-      <span>Transcreva.IA</span>
-    </a>
-    <div class="breadcrumb">
-      <span>/</span>
-      <a href="../index.html">Início</a>
-      <span>/</span>
-      <span>Ground Truth</span>
-    </div>
-    <div class="menu-dropdown" id="menuDropdown">
-  <a href="#" class="btn_menu" id="menuBtn">
-    <span>Menu</span>
-    <span class="menu-caret">▾</span>
-  </a>
-  <div class="menu-panel" id="menuPanel">
-    <a href="../index.html" class="menu-item">🏠 Início</a>
-    <a href="ground_truth.html" class="menu-item">📋 Ground Truth</a>
-    <a href="#" class="menu-item">📊 Meus arquivos</a>
-    <a href="#" class="menu-item">⚙️ Configurações</a>
-  </div>
-</div>
-  </div>
-</header>
-
-<main class="slides" id="slides">
-  <section class="hero-section" id="heroSection">
-    <h1 class="hero-title">Seja bem-vindo ao Transcreva.IA</h1>
- 
-<p class="hero-sub">Inicie a gravação, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição.</p>
- 
-<div class="control-bar">
- 
-
- 
-<button onclick="abrirYoutube()" class="btn-secondary" type="button">
-  <span class="btn-icon">▶</span> Link do YouTube
-</button>
- 
-<label class="btn-secondary btn-upload">
-  <span class="btn-icon">⬆</span> Enviar um MP3/MP4 
-  <input
-    type="file"
-    id="fileInput"
-    accept="audio/*,video/*"
-    class="hidden-input"
-    onchange="arquivoSelecionado(event)"
-  />
-</label>
- 
-</div>
- 
-</section>
-<section class="transcription-section" id="transcriptionSection">
-
-  <h2 class="hero-title">Converta áudio de aulas, reuniões e palestras em texto com IA</h2>
-  <p class="hero-sub">Inicie a gravação, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição.</p>
-
-  <div class="control-bar">
-    <button id="startBtn" class="btn-record" type="button">
-      <span id="micIcon" class="rec-icon">🎤</span>
-      Iniciar gravação
-    </button>
-
-    <button id="stopBtn" class="btn-stop" type="button">
-      <span class="rec-icon">⏹</span>
-      Parar gravação
-    </button>
-  </div>
-<div class="steps-grid">
-    <div>
-     
-      <h4 class="step-title">Faça sua transcrição</h4>
-      <p class="step-desc">Inicie a gravação, se não estiver usando clique em parar a gravação.</p>
-    </div>
-    <div>
-      
-      <h4 class="step-title">IA processa</h4>
-      <p class="step-desc">O sistema converte fala em texto automaticamente.</p>
-    </div>
-    <div>
-      <h4 class="step-title">Receba o texto</h4>
-      <p class="step-desc">Transcrição clara para aulas e reuniões.</p>
-    </div>
-  </div>
-  <div class="transcript-card">
-    <div class="transcript-header">
-      <h3 class="transcript-title">Transcrição em tempo real</h3>
-      <span id="status" class="status-badge">Aguardando</span>
-    </div>
-
-    <div id="transcript" class="transcript-box">
-      O texto transcrito aparecerá aqui...
-    </div>
-
-    <div class="transcript-footer">
-      <button id="downloadBtn" class="btn-download">Baixar transcrição</button>
-    </div>
-  </div>
-
-</section>
- 
-
-<section class="dataset-section" id="datasetSection">
-
-  <h2 class="page-title">Dataset de Ground Truth</h2>
-  <p class="page-sub">Conjunto de validação para medição de acurácia (WER/CER) do Transcreva.IA</p>
-
-  <!-- métricas -->
-  <div class="metrics-grid" id="metricsGrid">
-    <div class="metric-card">
-      <div class="metric-label">Total de arquivos</div>
-      <div class="metric-value indigo" id="m-total">—</div>
-      <div class="metric-sub">meta: 5–10 arquivos</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">WER médio</div>
-      <div class="metric-value" id="m-wer">—</div>
-      <div class="metric-sub">Word Error Rate</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Melhor WER</div>
-      <div class="metric-value green" id="m-best">—</div>
-      <div class="metric-sub">menor erro</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Pior WER</div>
-      <div class="metric-value" id="m-worst">—</div>
-      <div class="metric-sub">maior erro</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Palavras GT</div>
-      <div class="metric-value indigo" id="m-words">—</div>
-      <div class="metric-sub">total transcrito</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Validados</div>
-      <div class="metric-value green" id="m-valid">—</div>
-      <div class="metric-sub">prontos para teste</div>
-    </div>
-  </div>
-</section>
-<section class="tabs-section" id="tabsSection">
-  <!-- tabs -->
-  <div class="card">
-    <div class="card-header">
-      <div class="tabs">
-        
-        <button class="tab active" onclick="showTab('dataset', this)">📋 Dataset</button>
-        <button class="tab" onclick="showTab('wer', this)">📊 Análise WER</button>
-        <button class="tab" onclick="showTab('adicionar', this)">➕ Adicionar áudio</button>
-        <button class="tab" onclick="showTab('storage', this)">☁️ Armazenamento</button>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn btn-outline" onclick="carregarDados()">↻ Atualizar</button>
-        <button class="btn btn-emerald" onclick="exportarDataset()">⬇ Exportar JSON</button>
-      </div>
-    </div>
-
-    <!-- ── Tab: Dataset ── -->
-    <div id="tab-dataset" class="tab-content active">
-      <div style="overflow-x:auto;">
-        <table class="dataset-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Arquivo</th>
-              <th>Fonte</th>
-              <th>Palavras GT</th>
-              <th>WER</th>
-              <th>CER</th>
-              <th>Storage</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="datasetBody">
-            <tr><td colspan="8" style="text-align:center; color:var(--gray-400); padding:32px;">Carregando dataset...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── Tab: WER ── -->
-    <div id="tab-wer" class="tab-content">
-      <div class="card-body">
-        <div class="wer-formula">WER = ( S + D + I ) / N × 100%</div>
-        <div class="wer-legend">
-          <div class="legend-item"><div class="legend-key">S</div><div class="legend-desc">Substituições</div></div>
-          <div class="legend-item"><div class="legend-key">D</div><div class="legend-desc">Deleções</div></div>
-          <div class="legend-item"><div class="legend-key">I</div><div class="legend-desc">Inserções</div></div>
-          <div class="legend-item"><div class="legend-key">N</div><div class="legend-desc">Palavras no GT</div></div>
+            <!-- MENU DROPDOWN -->
+            <div class="relative menu-dropdown" id="menuDropdown">
+                <a href="#" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2 rounded-xl text-sm flex items-center gap-2 transition" id="menuBtn">
+                    <span>Menu</span>
+                    <span class="text-xs text-gray-400">▾</span>
+                </a>
+                <div class="hidden absolute right-0 mt-2 w-48 bg-[#121827] border border-white/10 rounded-2xl shadow-2xl py-2 z-50 backdrop-blur-xl" id="menuPanel">
+                    <a href="../index.html" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">🏠 Início</a>
+                    <a href="ground_truth.html" class="block px-4 py-2 text-sm text-indigo-400 font-semibold hover:bg-white/5 transition">📋 Ground Truth</a>
+                    <a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">📊 Meus arquivos</a>
+                    <a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">⚙️ Configurações</a>
+                </div>
+            </div>
         </div>
-        <div id="werChart"></div>
-      </div>
-    </div>
+    </header>
 
-    <!-- ── Tab: Adicionar ── -->
-    <div id="tab-adicionar" class="tab-content">
-      <div class="card-body">
-        <div class="form-grid">
-          <div>
-            <label class="field-label">Arquivo de áudio</label>
-            <div class="drop-zone" id="dropZone" onclick="document.getElementById('audioInput').click()">
-              <div class="drop-icon">🎵</div>
-              <div id="dropText">Clique ou arraste o arquivo aqui</div>
-              <div class="field-hint" style="margin-top:6px;">MP3, WAV, M4A, WebM — máx. 100 MB</div>
+    <main class="max-w-7xl mx-auto px-6 py-10 space-y-12" id="slides">
+
+        <!-- SEÇÃO HERO -->
+        <section class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 sm:p-10 shadow-2xl relative overflow-hidden" id="heroSection">
+            <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-emerald-400 to-indigo-500"></div>
+
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Seja bem-vindo ao Transcreva.IA</h1>
+            <p class="text-gray-400 mt-2 max-w-2xl text-sm sm:text-base">Inicie a gravação, cole um link do YouTube ou envie um arquivo MP3/MP4 para gerar a transcrição.</p>
+
+            <div class="flex flex-wrap gap-4 mt-6">
+                <button onclick="abrirYoutube()" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold px-5 py-3 rounded-xl text-sm transition flex items-center gap-2 hover:border-indigo-500/50" type="button">
+                    <span class="text-indigo-400">▶</span> Link do YouTube
+                </button>
+
+                <label class="bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-semibold px-5 py-3 rounded-xl text-sm transition shadow-lg shadow-indigo-600/20 hover:scale-[1.01] active:scale-95 cursor-pointer flex items-center gap-2">
+                    <span>⬆</span> Enviar um MP3/MP4 
+                    <input type="file" id="fileInput" accept="audio/*,video/*" class="hidden" onchange="arquivoSelecionado(event)" />
+                </label>
             </div>
-            <input type="file" id="audioInput" accept="audio/*,video/*" style="display:none" onchange="arquivoEscolhido(this)">
+        </section>
 
-            <label class="field-label" style="margin-top:16px;">Fonte do áudio</label>
-            <select class="gt-select" id="fonteSelect">
-              <option value="">Selecione a origem...</option>
-              <option value="Common Voice">Mozilla Common Voice</option>
-              <option value="LibriSpeech">LibriSpeech PT</option>
-              <option value="Podcast Acadêmico">Podcast Acadêmico</option>
-              <option value="YouTube">YouTube (domínio público)</option>
-              <option value="Gravação própria">Gravação própria</option>
-            </select>
-
-            <div class="field-hint" style="margin-top:10px; padding:10px; background:var(--indigo-light); border-radius:8px; color:var(--indigo-dark);">
-              💡 <strong>Dica:</strong> Use áudios de domínio público para garantir conformidade legal no dataset acadêmico.
-            </div>
-          </div>
-
-          <div>
-            <label class="field-label">Transcrição manual (Ground Truth)</label>
-            <textarea class="gt-input" id="gtTextarea"
-              placeholder="Digite aqui a transcrição exata e completa do áudio, palavra por palavra. Esta será a referência para o cálculo do WER.&#10;&#10;Ex: Bom dia professores e alunos presentes aqui nesta aula inaugural do curso de inteligência artificial..."></textarea>
-            <div class="field-hint">
-              <span id="wordCount">0 palavras</span> digitadas
+        <!-- SEÇÃO TRANSCRIÇÃO -->
+        <section class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-8 sm:p-10 shadow-2xl space-y-8" id="transcriptionSection">
+            <div>
+                <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Converta áudio em texto com IA</h2>
+                <p class="text-gray-400 text-sm mt-1">Gere transcrições precisas de aulas, reuniões e palestras instantaneamente.</p>
             </div>
 
-            <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
-              <button class="btn btn-primary" onclick="enviarParaServidor()">
-                ⬆ Adicionar ao dataset
-              </button>
-              <button class="btn btn-outline" onclick="limparFormulario()">
-                Limpar
-              </button>
+            <div class="flex flex-wrap gap-4">
+                <button id="startBtn" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-6 py-3.5 rounded-xl text-sm transition shadow-lg shadow-emerald-600/30 flex items-center gap-2" type="button">
+                    <span id="micIcon">🎤</span> Iniciar gravação
+                </button>
+
+                <button id="stopBtn" class="bg-red-600/80 hover:bg-red-600 text-white font-bold px-6 py-3.5 rounded-xl text-sm transition shadow-lg shadow-red-600/20 flex items-center gap-2" type="button">
+                    <span>⏹</span> Parar gravação
+                </button>
             </div>
-            <div id="uploadProgress" style="display:none; margin-top:12px;">
-              <div style="font-size:12px; color:var(--gray-600); margin-bottom:6px;" id="progressText">Enviando...</div>
-              <div style="height:4px; background:var(--gray-100); border-radius:2px; overflow:hidden;">
-                <div id="progressBar" style="height:100%; width:0%; background:var(--indigo); border-radius:2px; transition:width .3s;"></div>
-              </div>
+
+            <!-- PASSOS -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-white/5">
+                <div class="bg-white/5 border border-white/5 rounded-2xl p-5">
+                    <h4 class="font-bold text-white text-base mb-1">1. Faça sua transcrição</h4>
+                    <p class="text-gray-400 text-xs">Inicie a gravação, se não estiver usando clique em parar a gravação.</p>
+                </div>
+                <div class="bg-white/5 border border-white/5 rounded-2xl p-5">
+                    <h4 class="font-bold text-white text-base mb-1">2. IA processa</h4>
+                    <p class="text-gray-400 text-xs">O sistema converte fala em texto automaticamente.</p>
+                </div>
+                <div class="bg-white/5 border border-white/5 rounded-2xl p-5">
+                    <h4 class="font-bold text-white text-base mb-1">3. Receba o texto</h4>
+                    <p class="text-gray-400 text-xs">Transcrição clara para aulas e reuniões.</p>
+                </div>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- ── Tab: Storage ── -->
-    <div id="tab-storage" class="tab-content">
-      <div class="card-body">
-        <p style="font-size:13px; color:var(--gray-600); margin-bottom:18px;">
-          Configure a variável <code style="background:var(--gray-100); padding:2px 6px; border-radius:4px; font-size:12px;">STORAGE_BACKEND</code> no arquivo <code style="background:var(--gray-100); padding:2px 6px; border-radius:4px; font-size:12px;">.env</code> para alternar entre os backends.
-        </p>
+            <!-- CARD TRANSCRIÇÃO EM TEMPO REAL -->
+            <div class="bg-[#0b0f19]/80 border border-white/10 rounded-2xl p-6 space-y-4">
+                <div class="flex items-center justify-between border-b border-white/5 pb-4">
+                    <h3 class="font-bold text-white text-lg">Transcrição em tempo real</h3>
+                    <span id="status" class="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-xs font-semibold px-3 py-1 rounded-full">Aguardando</span>
+                </div>
 
-        <div class="storage-grid">
-          <div class="storage-card" id="card-local">
-            <div class="storage-logo">💾</div>
-            <div class="storage-name">Local (padrão)</div>
-            <div class="storage-desc">Armazena na pasta <code>ground_truth_dataset/</code> do servidor</div>
-            <div class="storage-status-label" style="background:var(--gray-100); color:var(--gray-600);">STORAGE_BACKEND=local</div>
-          </div>
-          <div class="storage-card" id="card-s3">
-            <div class="storage-logo">🪣</div>
-            <div class="storage-name">AWS S3</div>
-            <div class="storage-desc">Bucket S3 escalável. Configure as credenciais no <code>.env</code></div>
-            <div class="storage-status-label" style="background:var(--amber-light); color:var(--amber);">STORAGE_BACKEND=s3</div>
-          </div>
-          <div class="storage-card" id="card-gcs">
-            <div class="storage-logo">☁️</div>
-            <div class="storage-name">Google Cloud Storage</div>
-            <div class="storage-desc">Bucket GCS com credenciais de conta de serviço JSON</div>
-            <div class="storage-status-label" style="background:#e8f0fe; color:#1a73e8;">STORAGE_BACKEND=gcs</div>
-          </div>
-        </div>
+                <div id="transcript" class="min-h-[140px] text-gray-300 text-sm leading-relaxed whitespace-pre-wrap bg-black/20 p-4 rounded-xl border border-white/5">
+                    O texto transcrito aparecerá aqui...
+                </div>
 
-        <!-- variáveis de ambiente -->
-        <div style="margin-top:24px;">
-          <p class="field-label">Exemplo de .env</p>
-          <pre style="background:var(--gray-800); color:#a3e635; border-radius:10px; padding:16px; font-size:12px; overflow-x:auto; line-height:1.7;">GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
+                <div class="flex justify-end pt-2">
+                    <button id="downloadBtn" class="bg-white/10 hover:bg-white/20 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition">
+                        Baixar transcrição
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- SEÇÃO DATASET METRICS -->
+        <section class="space-y-6" id="datasetSection">
+            <div>
+                <h2 class="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Dataset de Ground Truth</h2>
+                <p class="text-gray-400 text-sm mt-1">Conjunto de validação para medição de acurácia (WER/CER) do Transcreva.IA</p>
+            </div>
+
+            <!-- MÉTRICAS -->
+            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4" id="metricsGrid">
+                <div class="bg-[#121827]/80 border border-white/10 rounded-2xl p-5 backdrop-blur-xl">
+                    <div class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Total de arquivos</div>
+                    <div class="text-2xl font-extrabold text-indigo-400 mt-2" id="m-total">—</div>
+                    <div class="text-[10px] text-gray-500 mt-1">meta: 5–10 arquivos</div>
+                </div>
+                <div class="bg-[#121827]/80 border border-white/10 rounded-2xl p-5 backdrop-blur-xl">
+                    <div class="text-xs text-gray-400 uppercase tracking-wider font-semibold">WER médio</div>
+                    <div class="text-2xl font-extrabold text-white mt-2" id="m-wer">—</div>
+                    <div class="text-[10px] text-gray-500 mt-1">Word Error Rate</div>
+                </div>
+                <div class="bg-[#121827]/80 border border-white/10 rounded-2xl p-5 backdrop-blur-xl">
+                    <div class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Melhor WER</div>
+                    <div class="text-2xl font-extrabold text-emerald-400 mt-2" id="m-best">—</div>
+                    <div class="text-[10px] text-gray-500 mt-1">menor erro</div>
+                </div>
+                <div class="bg-[#121827]/80 border border-white/10 rounded-2xl p-5 backdrop-blur-xl">
+                    <div class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Pior WER</div>
+                    <div class="text-2xl font-extrabold text-red-400 mt-2" id="m-worst">—</div>
+                    <div class="text-[10px] text-gray-500 mt-1">maior erro</div>
+                </div>
+                <div class="bg-[#121827]/80 border border-white/10 rounded-2xl p-5 backdrop-blur-xl">
+                    <div class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Palavras GT</div>
+                    <div class="text-2xl font-extrabold text-indigo-400 mt-2" id="m-words">—</div>
+                    <div class="text-[10px] text-gray-500 mt-1">total transcrito</div>
+                </div>
+                <div class="bg-[#121827]/80 border border-white/10 rounded-2xl p-5 backdrop-blur-xl">
+                    <div class="text-xs text-gray-400 uppercase tracking-wider font-semibold">Validados</div>
+                    <div class="text-2xl font-extrabold text-emerald-400 mt-2" id="m-valid">—</div>
+                    <div class="text-[10px] text-gray-500 mt-1">prontos para teste</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SEÇÃO TABS & PAINEL -->
+        <section class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl" id="tabsSection">
+            <div class="p-6 border-b border-white/10 flex flex-wrap items-center justify-between gap-4 bg-white/[0.02]">
+                <div class="flex flex-wrap gap-2">
+                    <button class="tab active px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('dataset', this)">📋 Dataset</button>
+                    <button class="tab px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('wer', this)">📊 Análise WER</button>
+                    <button class="tab px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('adicionar', this)">➕ Adicionar áudio</button>
+                    <button class="tab px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('storage', this)">☁️ Armazenamento</button>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <button class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold px-4 py-2 rounded-xl text-xs transition" onclick="carregarDados()">↻ Atualizar</button>
+                    <button class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-emerald-600/20" onclick="exportarDataset()">⬇ Exportar JSON</button>
+                </div>
+            </div>
+
+            <div class="p-6 sm:p-8">
+                <!-- TAB: DATASET -->
+                <div id="tab-dataset" class="tab-content active">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm text-gray-300 border-collapse">
+                            <thead>
+                                <tr class="border-b border-white/10 text-xs uppercase tracking-wider text-gray-400 bg-white/5">
+                                    <th class="p-4 rounded-l-xl">#</th>
+                                    <th class="p-4">Arquivo</th>
+                                    <th class="p-4">Fonte</th>
+                                    <th class="p-4">Palavras GT</th>
+                                    <th class="p-4">WER</th>
+                                    <th class="p-4">CER</th>
+                                    <th class="p-4">Storage</th>
+                                    <th class="p-4 rounded-r-xl">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="datasetBody" class="divide-y divide-white/5">
+                                <tr>
+                                    <td colspan="8" class="text-center text-gray-400 py-10">Carregando dataset...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB: WER -->
+                <div id="tab-wer" class="tab-content space-y-6">
+                    <div class="bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 p-4 rounded-2xl text-center font-mono font-bold text-lg">
+                        WER = ( S + D + I ) / N × 100%
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
+                            <div class="text-indigo-400 font-extrabold text-xl">S</div>
+                            <div class="text-xs text-gray-400 mt-1">Substituições</div>
+                        </div>
+                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
+                            <div class="text-indigo-400 font-extrabold text-xl">D</div>
+                            <div class="text-xs text-gray-400 mt-1">Deleções</div>
+                        </div>
+                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
+                            <div class="text-indigo-400 font-extrabold text-xl">I</div>
+                            <div class="text-xs text-gray-400 mt-1">Inserções</div>
+                        </div>
+                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
+                            <div class="text-indigo-400 font-extrabold text-xl">N</div>
+                            <div class="text-xs text-gray-400 mt-1">Palavras no GT</div>
+                        </div>
+                    </div>
+
+                    <div id="werChart" class="min-h-[200px] flex items-center justify-center text-gray-500 border border-white/5 rounded-2xl p-6 bg-black/20">
+                        <!-- Gráfico carregado via JS -->
+                    </div>
+                </div>
+
+                <!-- TAB: ADICIONAR ÁUDIO -->
+                <div id="tab-adicionar" class="tab-content">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="space-y-4">
+                            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider">Arquivo de áudio</label>
+                            
+                            <div class="border-2 border-dashed border-white/20 hover:border-indigo-500/50 bg-white/5 rounded-2xl p-8 text-center cursor-pointer transition" id="dropZone" onclick="document.getElementById('audioInput').click()">
+                                <div class="text-4xl mb-3">🎵</div>
+                                <div id="dropText" class="text-sm font-semibold text-white">Clique ou arraste o arquivo aqui</div>
+                                <div class="text-xs text-gray-400 mt-2">MP3, WAV, M4A, WebM — máx. 100 MB</div>
+                            </div>
+                            
+                            <input type="file" id="audioInput" accept="audio/*,video/*" class="hidden" onchange="arquivoEscolhido(this)">
+
+                            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider pt-2">Fonte do áudio</label>
+                            <select class="w-full px-4 py-3.5 bg-[#0b0f19]/60 border border-white/10 rounded-xl text-white focus:outline-none focus:border-indigo-500 text-sm" id="fonteSelect">
+                                <option value="">Selecione a origem...</option>
+                                <option value="Common Voice">Mozilla Common Voice</option>
+                                <option value="LibriSpeech">LibriSpeech PT</option>
+                                <option value="Podcast Acadêmico">Podcast Acadêmico</option>
+                                <option value="YouTube">YouTube (domínio público)</option>
+                                <option value="Gravação própria">Gravação própria</option>
+                            </select>
+
+                            <div class="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs text-indigo-300">
+                                💡 <strong>Dica:</strong> Use áudios de domínio público para garantir conformidade legal no dataset acadêmico.
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider">Transcrição manual (Ground Truth)</label>
+                            <textarea id="gtTextarea" rows="6" 
+                                class="w-full px-4 py-3.5 bg-[#0b0f19]/60 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm resize-none"
+                                placeholder="Digite aqui a transcrição exata e completa do áudio, palavra por palavra. Esta será a referência para o cálculo do WER.&#10;&#10;Ex: Bom dia professores e alunos presentes aqui nesta aula inaugural do curso de inteligência artificial..."></textarea>
+                            
+                            <div class="text-xs text-gray-400 flex justify-end">
+                                <span id="wordCount" class="text-indigo-400 font-semibold mr-1">0 palavras</span> digitadas
+                            </div>
+
+                            <div class="flex gap-3 pt-2">
+                                <button class="bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-bold px-6 py-3 rounded-xl text-sm transition shadow-lg shadow-indigo-600/30" onclick="enviarParaServidor()">
+                                    ⬆ Adicionar ao dataset
+                                </button>
+                                <button class="bg-white/5 hover:bg-white/10 text-gray-300 font-semibold px-5 py-3 rounded-xl text-sm border border-white/10 transition" onclick="limparFormulario()">
+                                    Limpar
+                                </button>
+                            </div>
+
+                            <div id="uploadProgress" class="hidden space-y-2 pt-2">
+                                <div class="text-xs text-gray-400" id="progressText">Enviando...</div>
+                                <div class="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                                    <div id="progressBar" class="h-full bg-indigo-500 rounded-full transition-all duration-300 w-0"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB: STORAGE -->
+                <div id="tab-storage" class="tab-content space-y-6">
+                    <p class="text-xs text-gray-400">
+                        Configure a variável <code class="bg-white/10 text-indigo-300 px-2 py-1 rounded font-mono">STORAGE_BACKEND</code> no arquivo <code class="bg-white/10 text-indigo-300 px-2 py-1 rounded font-mono">.env</code> para alternar entre os backends.
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-3" id="card-local">
+                            <div class="text-3xl">💾</div>
+                            <div class="font-bold text-white text-base">Local (padrão)</div>
+                            <p class="text-xs text-gray-400 leading-relaxed">Armazena na pasta <code class="text-gray-300">ground_truth_dataset/</code> do servidor</p>
+                            <span class="inline-block bg-white/10 text-gray-300 text-[10px] font-mono px-2.5 py-1 rounded-md">STORAGE_BACKEND=local</span>
+                        </div>
+
+                        <div class="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-3" id="card-s3">
+                            <div class="text-3xl">🪣</div>
+                            <div class="font-bold text-white text-base">AWS S3</div>
+                            <p class="text-xs text-gray-400 leading-relaxed">Bucket S3 escalável. Configure as credenciais no <code class="text-gray-300">.env</code></p>
+                            <span class="inline-block bg-amber-500/20 text-amber-300 text-[10px] font-mono px-2.5 py-1 rounded-md">STORAGE_BACKEND=s3</span>
+                        </div>
+
+                        <div class="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-3" id="card-gcs">
+                            <div class="text-3xl">☁️</div>
+                            <div class="font-bold text-white text-base">Google Cloud Storage</div>
+                            <p class="text-xs text-gray-400 leading-relaxed">Bucket GCS com credenciais de conta de serviço JSON</p>
+                            <span class="inline-block bg-blue-500/20 text-blue-300 text-[10px] font-mono px-2.5 py-1 rounded-md">STORAGE_BACKEND=gcs</span>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2 pt-4">
+                        <p class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Exemplo de .env</p>
+                        <pre class="bg-[#080b12] text-emerald-400 border border-white/10 rounded-2xl p-5 text-xs font-mono overflow-x-auto leading-relaxed">GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
 
 # ── escolha um: local | s3 | gcs ──
 STORAGE_BACKEND=s3
@@ -416,26 +456,33 @@ AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxx
 # ── Google Cloud Storage ──
 GCS_BUCKET_NAME=transcreva-ground-truth
 GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/credenciais.json</pre>
-        </div>
+                    </div>
 
-        <div style="margin-top:16px;">
-          <p class="field-label">Instalar dependências</p>
-          <pre style="background:var(--gray-800); color:#a3e635; border-radius:10px; padding:16px; font-size:12px;">pip install flask flask-cors groq boto3 google-cloud-storage jiwer python-dotenv</pre>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-</main>
-<nav class="slide-nav" id="slideNav">
-  <button class="slide-dot active" data-slide="0" aria-label="Início"></button>
-  <button class="slide-dot" data-slide="1" aria-label="Dataset"></button>
-  <button class="slide-dot" data-slide="2" aria-label="Análises"></button>
-</nav>
-<button class="slide-arrow slide-prev" id="slidePrev" aria-label="Seção anterior">‹</button>
-<button class="slide-arrow slide-next" id="slideNext" aria-label="Próxima seção">›</button>
+                    <div class="space-y-2 pt-2">
+                        <p class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Instalar dependências</p>
+                        <pre class="bg-[#080b12] text-emerald-400 border border-white/10 rounded-2xl p-5 text-xs font-mono overflow-x-auto">pip install flask flask-cors groq boto3 google-cloud-storage jiwer python-dotenv</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
 
+    </main>
 
-<script src="ground.js"></script>
+    <!-- NAVEGAÇÃO SECUNDÁRIA / SLIDES -->
+    <nav class="hidden" id="slideNav">
+        <button class="slide-dot active" data-slide="0" aria-label="Início"></button>
+        <button class="slide-dot" data-slide="1" aria-label="Dataset"></button>
+        <button class="slide-dot" data-slide="2" aria-label="Análises"></button>
+    </nav>
+    <button class="hidden" id="slidePrev" aria-label="Seção anterior">‹</button>
+    <button class="hidden" id="slideNext" aria-label="Próxima seção">›</button>
+
+    <!-- FOOTER -->
+    <footer class="border-t border-white/10 py-6 bg-[#080b12]/50 text-center text-gray-500 text-xs mt-12">
+        <p>© 2026 Transcreva.IA — Projeto Acadêmico (TCC)</p>
+    </footer>
+
+    <!-- SCRIPT DA PÁGINA -->
+    <script src="ground.js"></script>
 </body>
 </html>
