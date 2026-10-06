@@ -6,3 +6,4 @@ chave.env
 venv/
 .venv/
 __pycache__/
+*.mp4

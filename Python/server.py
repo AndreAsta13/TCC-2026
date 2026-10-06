@@ -21,6 +21,9 @@ from dotenv import load_dotenv
 
 print("Importando numpy/soundfile...", flush=True)
 import os, tempfile, shutil, json
+import subprocess
+import hashlib
+import httpx
 import threading
 import bisect
 import numpy as np
@@ -85,6 +88,37 @@ REPARAR_FRONTEIRAS_LLM = os.getenv("REPARAR_FRONTEIRAS_LLM", "true").strip().low
 # (os timestamps finais são SEMPRE devolvidos na linha do tempo do áudio original,
 # graças ao mapa de tempo). Coloque "false" para não cortar nada.
 REMOVER_SILENCIO_MONO = os.getenv("REMOVER_SILENCIO_MONO", "true").strip().lower() in ("1", "true", "sim", "yes")
+
+# ---------------------------------------------------------------------------
+# [NOVO] PERFIL DE ÁUDIO: "conversa" (padrão, entrevistas) ou "musica" (trap/rap)
+# ---------------------------------------------------------------------------
+PERFIL_AUDIO = os.getenv("PERFIL_AUDIO", "conversa").strip().lower()
+EH_MUSICA = PERFIL_AUDIO == "musica"
+
+# Em música estéreo, os dois canais carregam a MESMA voz (mix), então
+# por padrão forçamos mono para não duplicar processamento.
+FORCAR_MONO = EH_MUSICA or os.getenv("FORCAR_MONO", "false").strip().lower() in ("1", "true", "sim", "yes")
+
+# Opcional (pesado): isola o stem de vocais com Demucs antes do Whisper.
+ISOLAR_VOCAIS_DEMUCS = os.getenv("ISOLAR_VOCAIS_DEMUCS", "false").strip().lower() in ("1", "true", "sim", "yes")
+
+if EH_MUSICA:
+    # VAD por energia não funciona com beat/instrumental: tudo parece "fala".
+    REMOVER_SILENCIO_MONO = False
+
+# ---------------------------------------------------------------------------
+# [NOVO] RECONHECIMENTO DE MÚSICA NA NUVEM (AudD) — usado no perfil "musica"
+# ---------------------------------------------------------------------------
+# AUDD_API_TOKEN: token da API do AudD (https://audd.io). Sem token, a etapa é pulada.
+AUDD_API_TOKEN = os.getenv("AUDD_API_TOKEN", "").strip()
+# Liga/desliga o reconhecimento (padrão: ligado só no perfil música).
+RECONHECER_MUSICA = os.getenv("RECONHECER_MUSICA", "true" if EH_MUSICA else "false").strip().lower() in ("1", "true", "sim", "yes")
+# Busca a letra via API e usa como REFERÊNCIA para corrigir as palavras do ASR
+# (os timestamps continuam sendo os do Whisper).
+USAR_LETRA_OFICIAL = os.getenv("USAR_LETRA_OFICIAL", "true").strip().lower() in ("1", "true", "sim", "yes")
+# Só aplica a letra se ela for parecida o bastante com o que o ASR ouviu
+# (protege contra identificação errada).
+LIMITE_SIMILARIDADE_LETRA = float(os.getenv("LIMITE_SIMILARIDADE_LETRA", "0.35"))
 
 _diarization_pipeline = None
 # Protege tanto o carregamento (lazy singleton) quanto as chamadas de
@@ -158,62 +192,47 @@ def _detectar_canais(caminho_entrada):
 
 
 # ---------------------------------------------------------------------------
-# CONVERSÃO PARA WAV PCM 16-BIT + INFORMAÇÕES DOS BITS
+# CONVERSÃO PARA WAV PCM 16-BIT
 # ---------------------------------------------------------------------------
 def _converter_para_wav_lossless(caminho_entrada, caminho_saida, canais):
     """
     Converte o áudio para WAV PCM 16-bit.
 
-    Registra:
-    - Bits originais, quando disponíveis.
-    - Bits convertidos.
-    - Formato original e convertido.
-    - Quantidade de canais.
-    - Taxa de amostragem original.
+    Registra as características do áudio original e as características
+    do áudio convertido.
     """
 
-    # 1. Consultar informações do arquivo original
-    info_original = ffmpeg.probe(caminho_entrada)
+    # ---------------------------------------------------------------
+    # 1. Descobrir informações do áudio original
+    # ---------------------------------------------------------------
+    probe = ffmpeg.probe(caminho_entrada)
 
-    stream_original = next(
+    stream_audio = next(
         (
             stream
-            for stream in info_original.get("streams", [])
+            for stream in probe.get("streams", [])
             if stream.get("codec_type") == "audio"
         ),
-        {}
+        None
     )
 
-    formato_original = stream_original.get("codec_name")
-    sample_fmt_original = stream_original.get("sample_fmt")
-    taxa_original = stream_original.get("sample_rate")
-    canais_originais = stream_original.get("channels")
+    if stream_audio is None:
+        raise ValueError("Nenhuma trilha de áudio encontrada.")
 
-    bits_original = stream_original.get("bits_per_raw_sample") or stream_original.get("bits_per_sample")
-    try:
-        bits_original = int(bits_original) if bits_original else None
-        if bits_original == 0:
-            bits_original = None
-    except (TypeError, ValueError):
-        bits_original = None
+    codec_original = stream_audio.get("codec_name", "desconhecido")
+    sample_rate_original = stream_audio.get("sample_rate", "desconhecido")
+    canais_original = stream_audio.get("channels", "desconhecido")
+    bits_original = stream_audio.get("bits_per_sample", 0)
 
-    # Em codecs com perdas (mp3, aac dentro do mp4...) o ffprobe costuma
-    # devolver 'bits_per_sample'/'bits_per_raw_sample' zerados ou ausentes,
-    # já que não existe uma "profundidade de bits" real armazenada — nesse
-    # caso, usamos o 'sample_fmt' (formato de decodificação interno) como
-    # melhor aproximação disponível, em vez de reportar bits_original=None.
-    if bits_original is None and sample_fmt_original:
-        MAPA_BITS_POR_SAMPLE_FMT = {
-            'u8': 8, 'u8p': 8,
-            's16': 16, 's16p': 16,
-            's32': 32, 's32p': 32,
-            'flt': 32, 'fltp': 32,
-            'dbl': 64, 'dblp': 64,
-            's64': 64, 's64p': 64,
-        }
-        bits_original = MAPA_BITS_POR_SAMPLE_FMT.get(sample_fmt_original)
+    # AAC/MP3/etc. normalmente não possuem bits_per_sample PCM.
+    if bits_original in (None, 0, "0"):
+        bits_original_texto = "não aplicável (áudio comprimido)"
+    else:
+        bits_original_texto = f"{bits_original}-bit"
 
-    # 2. Converter para WAV PCM 16-bit
+    # ---------------------------------------------------------------
+    # 2. Conversão
+    # ---------------------------------------------------------------
     (
         ffmpeg
         .input(caminho_entrada)
@@ -223,48 +242,341 @@ def _converter_para_wav_lossless(caminho_entrada, caminho_saida, canais):
             acodec="pcm_s16le",
             ac=canais
         )
-        .run(quiet=True, overwrite_output=True)
+        .run(
+            quiet=True,
+            overwrite_output=True
+        )
     )
 
-    # 3. Consultar informações do arquivo convertido
-    info_convertido = ffmpeg.probe(caminho_saida)
+    # ---------------------------------------------------------------
+    # 3. Informações do WAV convertido
+    # ---------------------------------------------------------------
+    probe_convertido = ffmpeg.probe(caminho_saida)
 
     stream_convertido = next(
         (
             stream
-            for stream in info_convertido.get("streams", [])
+            for stream in probe_convertido.get("streams", [])
             if stream.get("codec_type") == "audio"
         ),
-        {}
+        None
     )
 
-    bits_convertidos = stream_convertido.get("bits_per_sample")
+    if stream_convertido is None:
+        raise ValueError("Não foi possível verificar o WAV convertido.")
 
-    if bits_convertidos is not None:
-        bits_convertidos = int(bits_convertidos)
+    sample_rate_convertido = stream_convertido.get(
+        "sample_rate",
+        "desconhecido"
+    )
 
-    bits_original_str = f"{bits_original}-bit" if bits_original else "desconhecido"
-    bits_convertido_str = f"{bits_convertidos}-bit" if bits_convertidos else "desconhecido"
-    print(f"    Profundidade de bits: {bits_original_str} (original, {formato_original}) "
-          f"-> {bits_convertido_str} (convertido, PCM 16-bit)", flush=True)
+    canais_convertido = stream_convertido.get(
+        "channels",
+        "desconhecido"
+    )
 
-    # 4. Retornar informações para o restante do TCC
+    bits_convertido = stream_convertido.get(
+        "bits_per_sample",
+        16
+    )
+
+    print(
+        "\n--- CONVERSÃO DE ÁUDIO ---",
+        flush=True
+    )
+
+    print(
+        f"Formato original: {codec_original.upper()}",
+        flush=True
+    )
+
+    print(
+        f"Profundidade original: {bits_original_texto}",
+        flush=True
+    )
+
+    print(
+        f"Taxa de amostragem original: "
+        f"{sample_rate_original} Hz",
+        flush=True
+    )
+
+    print(
+        f"Canais originais: {canais_original}",
+        flush=True
+    )
+
+    print(
+        f"Formato convertido: PCM {bits_convertido}-bit",
+        flush=True
+    )
+
+    print(
+        f"Taxa de amostragem convertida: "
+        f"{sample_rate_convertido} Hz",
+        flush=True
+    )
+
+    print(
+        f"Canais convertidos: {canais_convertido}",
+        flush=True
+    )
+
+    print(
+        "---------------------------\n",
+        flush=True
+    )
+
     return {
-        "bits_original": bits_original,
-        "bits_convertidos": bits_convertidos,
-        "formato_original": formato_original,
-        "formato_convertido": stream_convertido.get("codec_name"),
-        "sample_fmt_original": sample_fmt_original,
-        "sample_fmt_convertido": stream_convertido.get("sample_fmt"),
-        "taxa_amostragem_original": taxa_original,
-        "canais_originais": canais_originais,
-        "canais_convertidos": stream_convertido.get("channels"),
-        "observacao": (
-            "Conversão para PCM 16-bit. "
-            "A conversão não é lossless em profundidade de bits "
-            "quando o original possui mais de 16 bits."
-        )
+        "formato_original": codec_original,
+        "profundidade_original": bits_original_texto,
+        "taxa_amostragem_original_hz": sample_rate_original,
+        "canais_originais": canais_original,
+        "formato_convertido": f"PCM {bits_convertido}-bit",
+        "taxa_amostragem_convertida_hz": sample_rate_convertido,
+        "canais_convertidos": canais_convertido,
     }
+
+
+# ---------------------------------------------------------------------------
+# [NOVO] ISOLAMENTO DE VOCAIS (Demucs) — opcional, pesado. Útil em música.
+# Requer: pip install demucs
+# ---------------------------------------------------------------------------
+def _isolar_vocais_demucs(caminho_wav, pasta_saida):
+    """
+    Roda o Demucs e devolve o caminho do vocals.wav, ou None se falhar
+    (nesse caso o erro REAL do Demucs é impresso e o pipeline segue com o
+    áudio original, em vez de abortar tudo).
+    """
+    resultado = subprocess.run(
+        [sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs",
+         "-o", pasta_saida, caminho_wav],
+        capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+    if resultado.returncode != 0:
+        print(f"    [DEMUCS] FALHOU (código {resultado.returncode}). Saída de erro:\n"
+              f"{(resultado.stderr or resultado.stdout or '(sem saída)').strip()[-3000:]}",
+              flush=True)
+        return None
+
+    nome = os.path.splitext(os.path.basename(caminho_wav))[0]
+    caminho_vocais = os.path.join(pasta_saida, "htdemucs", nome, "vocals.wav")
+    if not os.path.exists(caminho_vocais):
+        print(f"    [DEMUCS] Terminou sem erro, mas não achei {caminho_vocais}.", flush=True)
+        return None
+    return caminho_vocais
+
+
+# ---------------------------------------------------------------------------
+# [NOVO] RECONHECIMENTO DE MÚSICA NA NUVEM (AudD) + LETRA + CACHE LOCAL
+# ---------------------------------------------------------------------------
+# Fluxo: recorta ~20s do áudio ORIGINAL (a mixagem completa, antes do Demucs,
+# porque fingerprint funciona melhor com o instrumental junto) -> AudD
+# identifica título/artista -> busca a letra -> tudo é guardado em
+# cache_musicas.json (chave = SHA-1 do arquivo), então a mesma faixa não
+# volta a consultar a nuvem.
+AUDD_URL = "https://api.audd.io/"
+AUDD_URL_LETRA = "https://api.audd.io/findLyrics/"
+CAMINHO_CACHE_MUSICAS = os.path.join(BASE_DIR, "cache_musicas.json")
+_cache_musicas_lock = threading.Lock()
+
+
+def _hash_arquivo(caminho):
+    h = hashlib.sha1()
+    with open(caminho, "rb") as f:
+        for bloco in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def _ler_cache_musicas():
+    try:
+        with open(CAMINHO_CACHE_MUSICAS, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _salvar_no_cache_musicas(chave, info):
+    with _cache_musicas_lock:
+        cache = _ler_cache_musicas()
+        cache[chave] = info
+        with open(CAMINHO_CACHE_MUSICAS, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def _extrair_trecho_para_reconhecimento(wav_path, saida, duracao_total, duracao_trecho=15):
+    # Trecho de ~15s a partir dos 15s (onde beat e voz já entraram juntos);
+    # em áudios curtos, começa em 1/3 da duração.
+    inicio = min(15.0, max(0.0, duracao_total / 3))
+    duracao = min(float(duracao_trecho), float(duracao_total))
+    (
+        ffmpeg
+        .input(wav_path, ss=inicio, t=duracao)
+        .output(saida, acodec='pcm_s16le', ac=1, ar=44100)
+        .run(capture_stdout=True, capture_stderr=True, overwrite_output=True)
+    )
+
+
+def _reconhecer_musica_audd(caminho_trecho):
+    with open(caminho_trecho, "rb") as f:
+        resp = httpx.post(
+            AUDD_URL,
+            data={"api_token": AUDD_API_TOKEN, "return": "lyrics,spotify"},
+            files={"file": (os.path.basename(caminho_trecho), f.read())},
+            timeout=30.0,
+        )
+    dados = resp.json()
+    if not isinstance(dados, dict) or dados.get("status") != "success" or not dados.get("result"):
+        return None
+    resultado = dados["result"]
+
+    # A letra pode vir como {"lyrics": "..."} ou direto como texto, dependendo da resposta.
+    letra_bruta = resultado.get("lyrics")
+    letra = letra_bruta.get("lyrics") if isinstance(letra_bruta, dict) else letra_bruta
+
+    return {
+        "titulo": resultado.get("title"),
+        "artista": resultado.get("artist"),
+        "album": resultado.get("album"),
+        "lancamento": resultado.get("release_date"),
+        "link": resultado.get("song_link"),
+        "letra": letra if isinstance(letra, str) and letra.strip() else None,
+    }
+
+
+def _buscar_letra_audd(artista, titulo):
+    resp = httpx.get(
+        AUDD_URL_LETRA,
+        params={"q": f"{artista} {titulo}", "api_token": AUDD_API_TOKEN},
+        timeout=30.0,
+    )
+    dados = resp.json()
+    candidatos = (dados.get("result") if isinstance(dados, dict) else None) or []
+    alvo_t = _normalizar_texto_comparacao(titulo or "")
+    alvo_a = _normalizar_texto_comparacao(artista or "")
+    melhor, melhor_score = None, 0.0
+    for c in candidatos:
+        letra = c.get("lyrics")
+        if not letra:
+            continue
+        s_t = SequenceMatcher(None, alvo_t, _normalizar_texto_comparacao(c.get("title", ""))).ratio()
+        s_a = SequenceMatcher(None, alvo_a, _normalizar_texto_comparacao(c.get("artist", ""))).ratio()
+        score = (s_t + s_a) / 2
+        if score > melhor_score:
+            melhor, melhor_score = letra, score
+    return melhor if melhor_score >= 0.6 else None
+
+
+def _identificar_musica(caminho_arquivo, wav_path, duracao_total):
+    """
+    Devolve um dict {titulo, artista, album, lancamento, link, letra} ou
+    None (não identificada / sem token / erro de rede). Nunca derruba o
+    pipeline: qualquer falha vira log e o fluxo segue com ASR puro.
+    """
+    chave = _hash_arquivo(caminho_arquivo)
+    with _cache_musicas_lock:
+        em_cache = _ler_cache_musicas().get(chave)
+    if em_cache:
+        print(f"    [MÚSICA] Já identificada antes (cache): "
+              f"{em_cache.get('artista')} - {em_cache.get('titulo')}", flush=True)
+        return em_cache
+
+    if not AUDD_API_TOKEN:
+        print("    [MÚSICA] AUDD_API_TOKEN não definido no .env — pulando reconhecimento.", flush=True)
+        return None
+
+    trecho = wav_path.rsplit('.', 1)[0] + '_trecho_id.wav'
+    try:
+        _extrair_trecho_para_reconhecimento(wav_path, trecho, duracao_total)
+        info = _reconhecer_musica_audd(trecho)
+        if not info:
+            print("    [MÚSICA] Faixa não identificada na nuvem — seguindo com a transcrição (ASR).", flush=True)
+            return None
+        print(f"    [MÚSICA] Identificada: {info.get('artista')} - {info.get('titulo')}", flush=True)
+
+        if not USAR_LETRA_OFICIAL:
+            info["letra"] = None
+        elif info.get("letra"):
+            print("    [MÚSICA] Letra veio junto com o reconhecimento.", flush=True)
+        else:
+            # Reconhecimento não trouxe a letra: tenta a busca separada por artista + título
+            try:
+                info["letra"] = _buscar_letra_audd(info.get("artista"), info.get("titulo"))
+                print(f"    [MÚSICA] Letra {'encontrada (busca separada)' if info['letra'] else 'NÃO encontrada'}.", flush=True)
+            except Exception as e:
+                print(f"    [MÚSICA] Falha ao buscar a letra: {e}", flush=True)
+
+        _salvar_no_cache_musicas(chave, info)
+        return info
+    except Exception as e:
+        print(f"    [MÚSICA] Falha no reconhecimento: {e}", flush=True)
+        return None
+    finally:
+        if os.path.exists(trecho):
+            os.remove(trecho)
+
+
+def _resumo_musica(info):
+    """Versão da info da música para devolver na API (sem o texto da letra)."""
+    if not info:
+        return None
+    resumo = {k: info.get(k) for k in ("titulo", "artista", "album", "lancamento", "link")}
+    resumo["letra_encontrada"] = bool(info.get("letra"))
+    return resumo
+
+
+def _preparar_tokens_letra(letra):
+    """Letra -> lista de (texto_exibicao, token_normalizado). Ignora linhas
+    de marcação como [Refrão] e palavras que viram vazio após normalizar."""
+    linhas = [l for l in letra.splitlines() if not re.match(r"^\s*\[.*\]\s*$", l)]
+    tokens = []
+    for palavra in " ".join(linhas).split():
+        partes = _normalizar_texto_comparacao(palavra).split()
+        if len(partes) == 1:
+            tokens.append((palavra, partes[0]))
+        else:
+            tokens.extend((p, p) for p in partes)
+    return tokens
+
+
+def _alinhar_palavras_com_letra(palavras, letra, limite=LIMITE_SIMILARIDADE_LETRA):
+    """
+    Usa a letra como REFERÊNCIA de texto, mantendo os timestamps do ASR:
+    alinha as palavras do Whisper com as da letra (difflib) e, onde elas
+    batem ou há uma troca 1-para-1, usa a grafia da letra. Trechos que não
+    casam (ad-libs, trocas de tamanho diferente) ficam como o ASR ouviu.
+    Se a letra for parecida demais com pouco do que foi ouvido (similaridade
+    < limite), não aplica nada — provável identificação errada.
+    """
+    tokens_letra = _preparar_tokens_letra(letra or "")
+    if not palavras or not tokens_letra:
+        return palavras
+
+    asr = [(_normalizar_texto_comparacao(p["word"]).replace(" ", "") or f"\u00a7{i}")
+           for i, p in enumerate(palavras)]
+    ref = [n for _, n in tokens_letra]
+
+    matcher = SequenceMatcher(None, asr, ref, autojunk=False)
+    similaridade = matcher.ratio()
+    if similaridade < limite:
+        print(f"    [LETRA] Similaridade {similaridade:.2f} < {limite:.2f}: letra ignorada "
+              f"(identificação provavelmente errada).", flush=True)
+        return palavras
+
+    novas = list(palavras)
+    ajustadas = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal" or (tag == "replace" and (i2 - i1) == (j2 - j1)):
+            for k in range(i2 - i1):
+                novo = tokens_letra[j1 + k][0]
+                if novo != palavras[i1 + k]["word"].strip():
+                    novas[i1 + k] = {**palavras[i1 + k], "word": novo}
+                    ajustadas += 1
+
+    print(f"    [LETRA] Similaridade ASR x letra: {similaridade:.2f} | "
+          f"{ajustadas} palavra(s) ajustada(s) pela letra.", flush=True)
+    return novas
 
 
 # ---------------------------------------------------------------------------
@@ -1280,6 +1592,22 @@ FRASES_ALUCINACAO_CONHECIDAS = {
     "www amara org",
 }
 
+# [NOVO] Padrões de "lixo de legenda" que o Whisper herda do dataset de
+# treino (ex: "Legenda Adriana Zanotto"). Aplicados sobre o texto JÁ
+# normalizado (minúsculo, sem acento/pontuação).
+PADROES_LEGENDA_ALUCINADA = [re.compile(p) for p in (
+    r"^legendas?( \w+){1,5}$",                                   # "Legenda Adriana Zanotto"
+    r"^legendas? (pela|pelos|por|de|feitas? por|realizadas? por)\b.*",
+    r"^(transcricao|traducao|revisao|sincronizacao)( e legendas?)? (por|pela|de)\b.*",
+    r"^subtitles? (by|from)\b.*",
+    r"^captions? by\b.*",
+    r"\bamara org\b",
+)]
+
+
+def _eh_legenda_alucinada(texto_norm):
+    return any(p.search(texto_norm) for p in PADROES_LEGENDA_ALUCINADA)
+
 
 def _tempo_sobreposto_com_vad(inicio, fim, intervalos_fala, sr):
     """
@@ -1310,6 +1638,12 @@ def _segmento_e_provavel_alucinacao(segmento, intervalos_fala=None, sr=None):
     """
     texto = _campo(segmento, 'text', '') or ''
     texto_norm = _normalizar_texto_comparacao(texto)
+
+    # [NOVO] Lixo de legenda: descarte direto, sem depender do VAD (em música
+    # o VAD por energia enxerga o beat como "fala" e não pegaria isso).
+    if _eh_legenda_alucinada(texto_norm):
+        print(f"    [FALA FANTASMA] Legenda alucinada descartada: '{texto.strip()}'", flush=True)
+        return True
 
     no_speech_prob = _campo(segmento, 'no_speech_prob')
     avg_logprob = _campo(segmento, 'avg_logprob')
@@ -1420,17 +1754,29 @@ DURACAO_CHUNK_SEGUNDOS = 600  # 10 minutos por chunk — boa margem sob 25MB
 # palavras. Ex.: sem contexto, o Whisper pode ouvir "Lula da Silva" como
 # "Lula da Silvana", "MEI" como "meio", "pool de imprensa" como "PUM".
 #
-# [AJUSTADO] Agora escrito como frase natural (o Whisper responde melhor a
+# [AJUSTADO] Escrito como frase natural (o Whisper responde melhor a
 # texto corrido do que a lista solta) e SEM "Jair Bolsonaro", que puxava a
 # transcrição de "Eduardo" para "Jair" quando o orador citava os filhos.
-# Mantenha CURTO. Edite para o vocabulário do conteúdo que for transcrever
-# ou sobrescreva via variável de ambiente PROMPT_VOCABULARIO_TRANSCRICAO.
-PROMPT_VOCABULARIO_TRANSCRICAO = os.getenv(
-    "PROMPT_VOCABULARIO_TRANSCRICAO",
+# Mantenha CURTO (limite de ~224 tokens). Edite para o vocabulário do
+# conteúdo que for transcrever ou sobrescreva via variável de ambiente
+# PROMPT_VOCABULARIO_TRANSCRICAO.
+#
+# [NOVO] Agora há um prompt por perfil de áudio (PERFIL_AUDIO).
+PROMPT_CONVERSA = (
     "Entrevista política no Palácio do Planalto, com Lula da Silva, Ronaldo Caiado "
     "e o jornalista Ernesto Paglia, em um pool de imprensa. Assuntos: eleições 2026, "
     "MEI (Microempreendedor Individual), INSS, Daniel Vorcaro, escândalos, desfachatez, "
     "cana, Carluxo, Eduardo e Renan Bolsonaro. Sai governo, entra governo."
+)
+PROMPT_MUSICA = (
+    "Letra de trap brasileiro, com gírias e estrangeirismos: Teto, Doode, Reid, Stef, "
+    "Fabin, Ear Kid, Fendi, Balmain, Codein, Vlone, Patek, Glock, MEI, drip, placo, "
+    "cash, bitch."
+)
+
+PROMPT_VOCABULARIO_TRANSCRICAO = os.getenv(
+    "PROMPT_VOCABULARIO_TRANSCRICAO",
+    PROMPT_MUSICA if EH_MUSICA else PROMPT_CONVERSA
 )
 
 # ---------------------------------------------------------------------------
@@ -1458,6 +1804,9 @@ CORRECOES_TERMOS_CONHECIDOS = {
     "o maior inimigo do trabalho visou": "o maior inimigo do trabalhador avisou",
     "sai o governo, entra o governo": "Sai governo, entra governo",
 }
+
+# [NOVO] No perfil música, o dicionário político não se aplica.
+CORRECOES_ATIVAS = {} if EH_MUSICA else CORRECOES_TERMOS_CONHECIDOS
 
 
 def _preparar_audio_para_transcricao_groq(caminho_entrada):
@@ -2051,16 +2400,21 @@ def _corrigir_blocos(blocos):
     for bloco in blocos:
         # [NOVO] remove artefatos de gagueira ANTES do LLM
         texto_bruto = _remover_artefatos_gagueira(bloco["texto"])
-        texto_corrigido = _corrigir_texto(texto_bruto)
 
-        if not _texto_preserva_palavras(texto_bruto, texto_corrigido):
-            print(f"    [CORREÇÃO] Aviso: correção por LLM alterou demais o "
-                  f"conteúdo do bloco '{bloco['texto'][:60]}...' — revertendo "
-                  f"para o texto original (com capitalização básica).", flush=True)
+        if EH_MUSICA:
+            # [NOVO] Perfil música: sem LLM (ele "normaliza" gírias para português padrão)
             texto_corrigido = _capitalizar_texto_bruto(texto_bruto)
+        else:
+            texto_corrigido = _corrigir_texto(texto_bruto)
+
+            if not _texto_preserva_palavras(texto_bruto, texto_corrigido):
+                print(f"    [CORREÇÃO] Aviso: correção por LLM alterou demais o "
+                      f"conteúdo do bloco '{bloco['texto'][:60]}...' — revertendo "
+                      f"para o texto original (com capitalização básica).", flush=True)
+                texto_corrigido = _capitalizar_texto_bruto(texto_bruto)
 
         texto_corrigido = _reparar_espacamento_generico(texto_corrigido)
-        texto_corrigido = _aplicar_correcoes_termos(texto_corrigido, CORRECOES_TERMOS_CONHECIDOS)
+        texto_corrigido = _aplicar_correcoes_termos(texto_corrigido, CORRECOES_ATIVAS)
 
         bloco["texto_corrigido"] = texto_corrigido
     return blocos
@@ -2114,10 +2468,49 @@ def transcrever_arquivo(caminho_original, top_db=40):
             print(f"[3/10] Áudio detectado: {info_canais['tipo_audio']} "
                   f"(layout: {info_canais['layout']}, taxa: {info_canais['taxa_original']} Hz)")
 
+            # [NOVO] Perfil música / FORCAR_MONO: downmix para mono na conversão
+            # (evita C0/C1 redundantes com a mesma voz).
+            if FORCAR_MONO and tipo_canal != "mono":
+                print(f"[3/10] Perfil '{PERFIL_AUDIO}': forçando downmix para MONO "
+                      f"(evita C0/C1 redundantes).", flush=True)
+                canais = 1
+                tipo_canal = "mono"
+
             print(f"[4/10] Convertendo {extensao} para WAV sem perda de dados (PCM 16-bit)...")
             wav_lossless_path = tmp_path.rsplit('.', 1)[0] + '_lossless.wav'
             informacoes_conversao = _converter_para_wav_lossless(tmp_path, wav_lossless_path, canais)
             print(f"[4/10] WAV lossless gerado: {wav_lossless_path}")
+
+            # [NOVO] Reconhecimento na nuvem ANTES do Demucs (usa a mixagem completa)
+            info_musica = None
+            prompt_transcricao = PROMPT_VOCABULARIO_TRANSCRICAO
+            if RECONHECER_MUSICA:
+                print(f"[4/10] Reconhecendo a música na nuvem (AudD)...", flush=True)
+                info_musica = _identificar_musica(tmp_path, wav_lossless_path, duracao_bruta)
+                if info_musica and info_musica.get("titulo"):
+                    prompt_transcricao = (
+                        f'{PROMPT_VOCABULARIO_TRANSCRICAO} Faixa: "{info_musica["titulo"]}", '
+                        f'de {info_musica.get("artista") or "artista desconhecido"}.'
+                    )
+
+            # [NOVO] Isolamento de vocais (Demucs) — opcional, pesado
+            if ISOLAR_VOCAIS_DEMUCS:
+                print(f"[4/10] Isolando vocais com Demucs (pode demorar)...", flush=True)
+                pasta_demucs = tempfile.mkdtemp()
+                try:
+                    vocais = _isolar_vocais_demucs(wav_lossless_path, pasta_demucs)
+                    if vocais is None:
+                        print(f"[4/10] Demucs indisponível: seguindo com o áudio original "
+                              f"(sem isolar vocais).", flush=True)
+                    else:
+                        wav_vocais_path = tmp_path.rsplit('.', 1)[0] + '_vocais.wav'
+                        ffmpeg.input(vocais).output(
+                            wav_vocais_path, acodec='pcm_s16le', ac=1
+                        ).run(quiet=True, overwrite_output=True)
+                        os.replace(wav_vocais_path, wav_lossless_path)
+                        canais, tipo_canal = 1, "mono"
+                finally:
+                    shutil.rmtree(pasta_demucs, ignore_errors=True)
 
             if tipo_canal == "estereo":
                 print(f"[5/10] Separando canais estéreo em duas vozes (esquerda/direita)...")
@@ -2237,7 +2630,8 @@ def transcrever_arquivo(caminho_original, top_db=40):
                           f"(mapa de tempo com {len(mapa_tempo_mono)} trechos mantidos)")
                     audio_path = sem_silencio_path
                 else:
-                    print(f"[6/10] Remoção de silêncio DESATIVADA (REMOVER_SILENCIO_MONO=false): "
+                    print(f"[6/10] Remoção de silêncio DESATIVADA "
+                          f"(REMOVER_SILENCIO_MONO=false ou perfil música): "
                           f"usando o áudio normalizado inteiro.")
                     mapa_tempo_mono = None
                     audio_path = normalizado_path
@@ -2256,7 +2650,9 @@ def transcrever_arquivo(caminho_original, top_db=40):
                 segmentos_falantes = _remapear_segmentos_diarizacao(segmentos_falantes, converter_tempo_mono)
 
                 print(f"[8/10] Transcrevendo com timestamps por palavra (Groq)...")
-                palavras_transcricao, segmentos_whisper = _transcrever_com_timestamps(audio_path)
+                palavras_transcricao, segmentos_whisper = _transcrever_com_timestamps(
+                    audio_path, prompt_vocabulario=prompt_transcricao
+                )
                 palavras_transcricao = _filtrar_falas_fantasma(
                     palavras_transcricao, segmentos_whisper, intervalos_fala_mono, sr_mono
                 )
@@ -2265,6 +2661,12 @@ def transcrever_arquivo(caminho_original, top_db=40):
                 # usa o tempo do áudio processado) — assim diarização e palavras ficam na
                 # mesma linha do tempo e as pausas reais entre turnos são preservadas.
                 palavras_transcricao = _remapear_palavras(palavras_transcricao, converter_tempo_mono)
+
+                # [NOVO] Música identificada com letra: usa a letra como referência de texto
+                if info_musica and info_musica.get("letra"):
+                    palavras_transcricao = _alinhar_palavras_com_letra(
+                        palavras_transcricao, info_musica["letra"]
+                    )
 
                 resultado = _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao)
 
@@ -2283,6 +2685,7 @@ def transcrever_arquivo(caminho_original, top_db=40):
                     "segmentos": resultado,
                     "qualidade": [relatorio_qualidade_mono],
                     "informacoes_audio": informacoes_conversao,
+                    "musica": _resumo_musica(info_musica),
                 }
 
         # Caso o arquivo não seja .mp4/.mp3 (ex: .wav puro) — fluxo mínimo direto.
@@ -2365,9 +2768,11 @@ if __name__ == '__main__':
     if TESTE_LOCAL:
         diretorio_script = os.path.dirname(os.path.abspath(__file__))
         pasta_testes = os.path.join(os.path.dirname(diretorio_script), "Teste Video")
-        arquivos_teste = ["Teste2.mp4"]
+        arquivos_teste = ["Teste1.mp4"]
 
-        print(f"\n[DIAGNÓSTICO] Diretório do script: {diretorio_script}")
+        print(f"\n[DIAGNÓSTICO] Perfil de áudio: {PERFIL_AUDIO} "
+              f"(forçar mono: {FORCAR_MONO}, demucs: {ISOLAR_VOCAIS_DEMUCS})")
+        print(f"[DIAGNÓSTICO] Diretório do script: {diretorio_script}")
         print(f"[DIAGNÓSTICO] Pasta de testes esperada: {pasta_testes}")
         print(f"[DIAGNÓSTICO] Pasta existe? {os.path.isdir(pasta_testes)}")
         if os.path.isdir(pasta_testes):
