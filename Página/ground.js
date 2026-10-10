@@ -1,4 +1,19 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   ENDEREÇOS DOS BACKENDS
+   - API:             Node (login, /me, /arquivos/upload, /gt/..., /transcricoes)
+   - API_TRANSCRICAO: Flask (pipeline de transcrição: /transcrever e /status)
+   ══════════════════════════════════════════════════════════════════════════ */
 const API = 'http://localhost:3000';
+const API_TRANSCRICAO = 'http://localhost:5000';
+
+// Salva também o arquivo enviado na conta do usuário (Neon, via Node)?
+const SALVAR_ARQUIVO_NA_CONTA = true;
+
+// Intervalo entre as consultas de andamento ao Flask
+const INTERVALO_POLLING_MS = 2000;
+
+// Tamanho máximo do arquivo enviado (deve ser <= MAX_CONTENT_LENGTH do Flask: 500 MB)
+const TAMANHO_MAXIMO_MB = 500;
 
 /* ══════════════════════════════════════════════════════════════════════════
    Variáveis globais que serão preenchidas quando o DOM estiver pronto
@@ -12,6 +27,9 @@ let arquivoGtSelecionado = null;
 let usuarioLogado = false; // troque por uma checagem real de sessão
 let reconhecendo = false;
 let textoFinal = '';
+let emProcessamento = false;   // evita duas transcrições de arquivo ao mesmo tempo
+let ultimaTranscricao = '';    // texto "limpo" da última transcrição de arquivo (para o download)
+let toastTimer = null;
 
 /* ══ Tabs ══════════════════════════════════════════════════════════════════ */
 function showTab(id, btn) {
@@ -24,13 +42,22 @@ function showTab(id, btn) {
   if (id === 'wer') renderWerChart();
 }
 
-/* ══ Toast ══════════════════════════════════════════════════════════════════ */
+/* ══ Toast (usa classes Tailwind, então funciona no tema escuro) ═══════════ */
 function toast(msg, tipo = 'success') {
   const t = document.getElementById('toast');
   if (!t) return;
-  t.textContent = msg;
-  t.className = 'show ' + tipo;
-  setTimeout(() => { t.className = ''; }, 3200);
+  const cores = {
+    success: 'bg-emerald-600',
+    error: 'bg-red-600',
+    processando: 'bg-indigo-600',
+  };
+  t.innerHTML = '';
+  const el = document.createElement('div');
+  el.className = `${cores[tipo] || cores.success} text-white text-sm font-semibold px-4 py-3 rounded-xl shadow-lg max-w-sm`;
+  el.textContent = msg;
+  t.appendChild(el);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.innerHTML = ''; }, 3200);
 }
 
 /* ══ Cores WER ══════════════════════════════════════════════════════════════ */
@@ -266,68 +293,310 @@ function exportarDataset() {
   toast('Dataset exportado!', 'success');
 }
 
+/* ══ Badge de status (classes pensadas para o tema escuro) ═════════════════ */
 function setStatus(texto, tipo) {
   if (!statusEl) return;
   statusEl.textContent = texto;
+  const base = 'text-xs font-semibold px-3 py-1 rounded-full border ';
   const classes = {
-    aguardando:  'text-sm px-3 py-1 rounded-full bg-gray-100 text-gray-600',
-    processando: 'text-sm px-3 py-1 rounded-full bg-yellow-100 text-yellow-700',
-    sucesso:     'text-sm px-3 py-1 rounded-full bg-green-100 text-green-700',
-    erro:        'text-sm px-3 py-1 rounded-full bg-red-100 text-red-700',
+    aguardando:  base + 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+    processando: base + 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+    sucesso:     base + 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    erro:        base + 'bg-red-500/20 text-red-300 border-red-500/30',
   };
   statusEl.className = classes[tipo] || classes.aguardando;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   TRANSCRIÇÃO DE ARQUIVO (Flask)
+   Fluxo: POST /transcrever -> recebe job_id -> consulta /status/<job_id>
+   a cada 2s até "concluido" ou "erro".
+   ══════════════════════════════════════════════════════════════════════════ */
+function formatarTempo(segundos) {
+  const t = Math.max(0, Math.floor(segundos || 0));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/* Mostra texto na caixa de transcrição e volta a rolagem para o topo
+   (a caixa tem altura máxima e rola por dentro quando o texto é grande,
+   ex: transcrições de 40 min). */
+function mostrarNoTranscript(texto) {
+  if (transcriptEl) {
+    transcriptEl.textContent = texto;
+    transcriptEl.scrollTop = 0;
+  }
+}
+
+async function iniciarJobTranscricao(arquivo) {
+  const form = new FormData();
+  form.append('file', arquivo);   // mesmo nome lido por request.files.get('file') no Flask
+
+  let resp;
+  try {
+    resp = await fetch(`${API_TRANSCRICAO}/transcrever`, { method: 'POST', body: form });
+  } catch {
+    throw new Error('Servidor de transcrição offline. Verifique se o Flask está rodando na porta 5000.');
+  }
+
+  const dados = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(dados.erro || `Erro ${resp.status} ao enviar o arquivo.`);
+  return dados.job_id;
+}
+
+async function aguardarJob(jobId) {
+  const inicio = Date.now();
+
+  while (true) {
+    await new Promise(r => setTimeout(r, INTERVALO_POLLING_MS));
+
+    let resp;
+    try {
+      resp = await fetch(`${API_TRANSCRICAO}/status/${jobId}`);
+    } catch {
+      throw new Error('Perdi a conexão com o servidor de transcrição.');
+    }
+    if (!resp.ok) throw new Error('Não foi possível consultar o andamento da transcrição.');
+
+    const job = await resp.json();
+    const decorrido = formatarTempo((Date.now() - inicio) / 1000);
+
+    if (job.estado === 'concluido') return job.resultado;
+    if (job.estado === 'erro') throw new Error(job.erro || 'Falha na transcrição.');
+
+    if (job.estado === 'na_fila') {
+      setStatus(`Na fila (${decorrido})`, 'processando');
+      mostrarNoTranscript(`Aguardando a vez na fila de processamento...\nTempo: ${decorrido}`);
+    } else {
+      setStatus(`Processando (${decorrido})`, 'processando');
+      mostrarNoTranscript(
+        `Transcrevendo e identificando falantes...\nTempo: ${decorrido}\n\n` +
+        `Áudios longos podem levar alguns minutos. Você pode deixar esta aba aberta.`
+      );
+    }
+  }
+}
+
+function renderizarResultado(resultado) {
+  const segmentos = (resultado && resultado.segmentos) || [];
+
+  if (!segmentos.length) {
+    ultimaTranscricao = '';
+    mostrarNoTranscript('Nenhuma fala foi detectada neste arquivo.');
+    return;
+  }
+
+  const linhas = segmentos.map(s => {
+    const texto = s.texto_corrigido || s.texto || '';
+    const falante = s.falante_global || 'Falante';
+    return `[${formatarTempo(s.inicio)} – ${formatarTempo(s.fim)}] ${falante}: ${texto}`;
+  });
+
+  // Texto "limpo" usado no botão de download
+  ultimaTranscricao = linhas.join('\n\n');
+
+  let saida = ultimaTranscricao;
+
+  const musica = resultado.musica;
+  if (musica && musica.titulo) {
+    saida = `♪ ${musica.artista || 'Artista desconhecido'} — ${musica.titulo}\n\n` + saida;
+  }
+
+  const alertas = (resultado.qualidade || []).flatMap(q =>
+    (q.alertas || []).map(a => `• ${q.canal ? q.canal + ': ' : ''}${a}`)
+  );
+  if (alertas.length) {
+    saida += '\n\n⚠ Alertas de qualidade do áudio:\n' + alertas.join('\n');
+  }
+
+  mostrarNoTranscript(saida);   // textContent: seguro contra HTML vindo da transcrição
+}
+
+/* Salva o arquivo na conta do usuário (Node + Neon). Não bloqueia a
+   transcrição: se falhar, só avisa por toast. */
 async function enviarArquivoNeon(arquivo) {
   const token = localStorage.getItem("token");
 
   if (!token) {
     window.location.href = "../cadastro/login.html";
-    return;
+    return false;
   }
 
   const formData = new FormData();
   formData.append("file", arquivo);
 
   try {
-    setStatus("Enviando...", "processando");
-
-    if (transcriptEl) {
-      transcriptEl.textContent = "Enviando arquivo...";
-    }
-
     const response = await fetch(`${API}/arquivos/upload`, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`
-      },
+      headers: { "Authorization": `Bearer ${token}` },
       body: formData
     });
 
     const data = await response.json();
-
     if (!response.ok || !data.sucesso) {
       throw new Error(data.erro || "Erro no upload.");
     }
 
-    setStatus("Upload concluído!", "sucesso");
-
-    if (transcriptEl) {
-      transcriptEl.textContent =
-        "Arquivo enviado com sucesso.\n\n" +
-        data.arquivo.nome_original;
-    }
-
     toast(`"${data.arquivo.nome_original}" salvo na sua conta.`, "success");
+    return true;
   } catch (err) {
-    console.error("Erro:", err);
-    setStatus("Erro no upload", "erro");
-
-    if (transcriptEl) {
-      transcriptEl.textContent = err.message;
-    }
+    console.error("Erro ao salvar arquivo na conta:", err);
+    toast('Não consegui salvar o arquivo na sua conta (a transcrição continua).', 'error');
+    return false;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HISTÓRICO (pilha LIFO) — salva cada transcrição no Neon (via Node)
+   Nunca substitui: cada transcrição vira uma NOVA entrada. Se o servidor
+   falhar, fica em localStorage e é sincronizada ao abrir historico.html.
+   ══════════════════════════════════════════════════════════════════════════ */
+const CHAVE_PENDENTES = 'transcricoes_pendentes';
+
+function novoClientId() {
+  return (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+}
+
+function montarEntradaDoResultado(arquivo, resultado) {
+  const segmentos = (resultado && resultado.segmentos) || [];
+
+  const hipotese = segmentos
+    .map(s => s.texto_corrigido || s.texto || '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const palavrasFronteira = segmentos.flatMap(s =>
+    (s.palavras_fronteira || []).map(p => ({
+      palavra: p.palavra,
+      inicio: p.inicio,
+      fim: p.fim,
+      motivo: p.motivo,
+      de: p.de,
+      para: p.para,
+      falante: s.falante_global || null,
+    }))
+  );
+
+  return {
+    client_id: novoClientId(),
+    origem: 'arquivo',
+    titulo: arquivo.name,
+    nome_arquivo: arquivo.name,
+    texto: ultimaTranscricao,
+    hipotese,
+    segmentos: segmentos.map(s => ({
+      inicio: s.inicio,
+      fim: s.fim,
+      falante: s.falante_global || null,
+      texto: s.texto_corrigido || s.texto || '',
+    })),
+    palavras_fronteira: palavrasFronteira,
+    metadados: {
+      duracao_audio_s: resultado.duracao_audio_s ?? null,
+      tempo_processamento_s: resultado.tempo_processamento_s ?? null,
+      fator_tempo_real: resultado.fator_tempo_real ?? null,
+      configuracao: resultado.configuracao || null,
+      perfil: (resultado.perfil && resultado.perfil.perfil) || null,
+    },
+  };
+}
+
+function montarEntradaDoMicrofone(texto) {
+  const limpo = (texto || '').replace(/\s+/g, ' ').trim();
+  return {
+    client_id: novoClientId(),
+    origem: 'microfone',
+    titulo: 'Gravação ao vivo — ' + new Date().toLocaleString('pt-BR'),
+    nome_arquivo: null,
+    texto: limpo,
+    hipotese: limpo,
+    segmentos: [],
+    palavras_fronteira: [],
+    metadados: {},
+  };
+}
+
+async function salvarNoHistorico(entrada) {
+  const token = localStorage.getItem('token');
+  let salvo = false;
+
+  if (token) {
+    try {
+      const resp = await fetch(`${API}/transcricoes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(entrada),
+      });
+      const dados = await resp.json().catch(() => ({}));
+      salvo = resp.ok && dados.sucesso;
+    } catch (e) {
+      console.error('Erro ao salvar no histórico:', e);
+    }
+  }
+
+  if (!salvo) {
+    try {
+      const pendentes = JSON.parse(localStorage.getItem(CHAVE_PENDENTES) || '[]');
+      pendentes.push({ ...entrada, criado_em: new Date().toISOString() });
+      localStorage.setItem(CHAVE_PENDENTES, JSON.stringify(pendentes));
+    } catch (e) {
+      console.error('Erro ao guardar localmente:', e);
+    }
+    toast('Histórico guardado só neste navegador (servidor indisponível).', 'error');
+  } else {
+    toast('Transcrição adicionada ao histórico.', 'success');
+  }
+  return salvo;
+}
+
+async function processarArquivo(arquivo) {
+  if (emProcessamento) {
+    toast('Já existe uma transcrição em andamento. Aguarde terminar.', 'error');
+    return;
+  }
+  emProcessamento = true;
+  ultimaTranscricao = '';
+
+  // Em paralelo: guarda o arquivo na conta enquanto a transcrição roda
+  const salvando = SALVAR_ARQUIVO_NA_CONTA ? enviarArquivoNeon(arquivo) : Promise.resolve(true);
+
+  try {
+    setStatus('Enviando...', 'processando');
+    mostrarNoTranscript(`Enviando "${arquivo.name}" para transcrição...`);
+
+    const jobId = await iniciarJobTranscricao(arquivo);
+    const resultado = await aguardarJob(jobId);
+
+    renderizarResultado(resultado);
+    setStatus('Concluído', 'sucesso');
+
+    // Empilha no histórico (Neon) — só se houve fala detectada
+    if (ultimaTranscricao) {
+      await salvarNoHistorico(montarEntradaDoResultado(arquivo, resultado));
+    } else {
+      toast('Transcrição concluída!', 'success');
+    }
+  } catch (err) {
+    console.error('Erro na transcrição:', err);
+    setStatus('Erro na transcrição', 'erro');
+    mostrarNoTranscript(err.message);
+    toast(err.message, 'error');
+  } finally {
+    emProcessamento = false;
+    await salvando;
+  }
+}
+
 function arquivoSelecionado(event) {
   const input = event.target;
   const arquivo = input.files[0];
@@ -338,12 +607,14 @@ function arquivoSelecionado(event) {
     input.value = '';
     return;
   }
-  if (arquivo.size > 100 * 1024 * 1024) {
-    alert('Arquivo muito grande. Limite máximo: 100MB.');
+  if (arquivo.size > TAMANHO_MAXIMO_MB * 1024 * 1024) {
+    alert(`Arquivo muito grande. Limite máximo: ${TAMANHO_MAXIMO_MB}MB.`);
     input.value = '';
     return;
   }
-  enviarArquivoNeon(arquivo);
+
+  input.value = '';          // permite escolher o mesmo arquivo de novo depois
+  processarArquivo(arquivo);
 }
 
 function abrirYoutube() {
@@ -430,11 +701,15 @@ document.addEventListener('DOMContentLoaded', () => {
     goTo(0);
   }
 
-  /* ── menu dropdown do header ── */
-  if (menuBtn && menuDropdown) {
-    menuBtn.addEventListener('click', (e) => { e.preventDefault(); menuDropdown.classList.toggle('open'); });
-    document.addEventListener('click', (e) => { if (!menuDropdown.contains(e.target)) menuDropdown.classList.remove('open'); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') menuDropdown.classList.remove('open'); });
+  /* ── menu dropdown do header ──
+     O painel no HTML usa a classe Tailwind "hidden", então é ela que
+     precisa ser alternada (antes o código alternava uma classe "open"
+     que não tinha efeito). */
+  const menuPanel = document.getElementById('menuPanel');
+  if (menuBtn && menuPanel) {
+    menuBtn.addEventListener('click', (e) => { e.preventDefault(); menuPanel.classList.toggle('hidden'); });
+    document.addEventListener('click', (e) => { if (menuDropdown && !menuDropdown.contains(e.target)) menuPanel.classList.add('hidden'); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') menuPanel.classList.add('hidden'); });
   }
 
   /* ── drop zone (aba "Adicionar áudio") ── */
@@ -471,13 +746,18 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     recognition.onresult = (event) => {
+      ultimaTranscricao = '';   // a partir daqui o download usa o texto do microfone
       let textoTemp = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) textoFinal += transcript + ' ';
         else textoTemp += transcript;
       }
-      if (transcriptEl) transcriptEl.textContent = corrigirTexto(textoFinal + textoTemp);
+      if (transcriptEl) {
+        transcriptEl.textContent = corrigirTexto(textoFinal + textoTemp);
+        // Na gravação ao vivo, acompanha o texto novo rolando para o final
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      }
     };
 
     recognition.onerror = (event) => {
@@ -493,10 +773,18 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus('Microfone parado', 'aguardando');
       if (micIcon) micIcon.style.animation = 'none';
       reconhecendo = false;
+
+      // Cada gravação vira UMA nova entrada na pilha do histórico
+      const texto = corrigirTexto(textoFinal).trim();
+      if (texto) {
+        salvarNoHistorico(montarEntradaDoMicrofone(texto));
+      }
+      textoFinal = '';
     };
 
     startBtn.onclick = () => {
       if (!reconhecendo) {
+        textoFinal = '';   // nova gravação = nova entrada
         recognition.start();
         reconhecendo = true;
       }
@@ -511,8 +799,11 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ── download da transcrição ── */
   if (downloadBtn) {
     downloadBtn.onclick = () => {
-      const texto = transcriptEl ? transcriptEl.textContent.trim() : '';
-      if (!texto) { toast('Nenhuma transcrição disponível ainda.', 'error'); return; }
+      const texto = ultimaTranscricao || (transcriptEl ? transcriptEl.textContent.trim() : '');
+      if (!texto || texto.startsWith('O texto transcrito aparecerá aqui')) {
+        toast('Nenhuma transcrição disponível ainda.', 'error');
+        return;
+      }
       const blob = new Blob([texto], { type: 'text/plain' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);

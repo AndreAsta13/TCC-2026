@@ -16,7 +16,7 @@ print("Importando librosa (pode demorar um pouco)...", flush=True)
 import librosa
 
 print("Importando Groq...", flush=True)
-from groq import Groq
+from groq import Groq, RateLimitError
 from dotenv import load_dotenv
 
 print("Importando numpy/soundfile...", flush=True)
@@ -29,6 +29,9 @@ import bisect
 import numpy as np
 import soundfile as sf
 import concurrent.futures
+import uuid
+import math
+import time
 
 # --- Carrega o .env ANTES de qualquer uso de variável de ambiente (ex: FFMPEG_BIN) ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -88,16 +91,21 @@ REPARAR_FRONTEIRAS_LLM = os.getenv("REPARAR_FRONTEIRAS_LLM", "true").strip().low
 # (os timestamps finais são SEMPRE devolvidos na linha do tempo do áudio original,
 # graças ao mapa de tempo). Coloque "false" para não cortar nada.
 REMOVER_SILENCIO_MONO = os.getenv("REMOVER_SILENCIO_MONO", "true").strip().lower() in ("1", "true", "sim", "yes")
+_REMOVER_SILENCIO_ENV = REMOVER_SILENCIO_MONO   # [PERFIL] valor do .env, usado no perfil conversa
 
 # ---------------------------------------------------------------------------
 # [NOVO] PERFIL DE ÁUDIO: "conversa" (padrão, entrevistas) ou "musica" (trap/rap)
 # ---------------------------------------------------------------------------
-PERFIL_AUDIO = os.getenv("PERFIL_AUDIO", "conversa").strip().lower()
+PERFIL_AUDIO = os.getenv("PERFIL_AUDIO", "auto").strip().lower()   # auto | conversa | musica
+if PERFIL_AUDIO not in ("auto", "conversa", "musica"):
+    print(f"AVISO: PERFIL_AUDIO='{PERFIL_AUDIO}' inválido; usando 'auto'.", flush=True)
+    PERFIL_AUDIO = "auto"
 EH_MUSICA = PERFIL_AUDIO == "musica"
 
 # Em música estéreo, os dois canais carregam a MESMA voz (mix), então
 # por padrão forçamos mono para não duplicar processamento.
-FORCAR_MONO = EH_MUSICA or os.getenv("FORCAR_MONO", "false").strip().lower() in ("1", "true", "sim", "yes")
+# [PERFIL] Só o perfil música força mono. No perfil conversa os canais são sempre preservados.
+FORCAR_MONO = EH_MUSICA
 
 # Opcional (pesado): isola o stem de vocais com Demucs antes do Whisper.
 ISOLAR_VOCAIS_DEMUCS = os.getenv("ISOLAR_VOCAIS_DEMUCS", "false").strip().lower() in ("1", "true", "sim", "yes")
@@ -107,12 +115,44 @@ if EH_MUSICA:
     REMOVER_SILENCIO_MONO = False
 
 # ---------------------------------------------------------------------------
+# [EXPERIMENTO] INTERRUPTORES PARA COMPARAR CONFIGURAÇÕES (A / B / C)
+# ---------------------------------------------------------------------------
+# NORMALIZAR_LOUDNESS : true  -> normalização EBU R128 (loudnorm) nos canais
+#                       false -> só conversão para WAV 16 kHz mono, SEM loudnorm
+# POS_PROCESSAMENTO   : "completo"   -> regras + correção por LLM (comportamento atual)
+#                       "nenhum"     -> texto_corrigido == texto (saída do ASR intacta)
+#                       "so_llm"     -> só a correção por LLM (+ capitalização de fallback)
+#                       "so_regras"  -> só regras locais (gagueira, espaçamento, dicionário de termos)
+# Os valores do .env são o padrão; cada requisição pode sobrescrevê-los
+# (campos normalizar_loudness / pos_processamento em POST /transcrever).
+#
+# Configurações do orientador:
+#   A: normalizar_loudness=false, pos_processamento=nenhum
+#   B: normalizar_loudness=true,  pos_processamento=nenhum
+#   C: normalizar_loudness=true,  pos_processamento=completo   (ou so_llm / so_regras para isolar o efeito)
+#
+# Continuam ativos em TODAS as configurações (não são o objeto da comparação): filtro de
+# fala fantasma, reparo de fronteiras de turno e suavização da diarização.
+POS_PROCESSAMENTOS_VALIDOS = ("completo", "nenhum", "so_llm", "so_regras")
+
+_NORMALIZAR_LOUDNESS_ENV = os.getenv("NORMALIZAR_LOUDNESS", "true").strip().lower() in ("1", "true", "sim", "yes")
+_POS_PROCESSAMENTO_ENV = os.getenv("POS_PROCESSAMENTO", "completo").strip().lower()
+if _POS_PROCESSAMENTO_ENV not in POS_PROCESSAMENTOS_VALIDOS:
+    print(f"AVISO: POS_PROCESSAMENTO='{_POS_PROCESSAMENTO_ENV}' inválido; usando 'completo'.", flush=True)
+    _POS_PROCESSAMENTO_ENV = "completo"
+
+NORMALIZAR_LOUDNESS = _NORMALIZAR_LOUDNESS_ENV
+POS_PROCESSAMENTO = _POS_PROCESSAMENTO_ENV
+
+# ---------------------------------------------------------------------------
 # [NOVO] RECONHECIMENTO DE MÚSICA NA NUVEM (AudD) — usado no perfil "musica"
 # ---------------------------------------------------------------------------
 # AUDD_API_TOKEN: token da API do AudD (https://audd.io). Sem token, a etapa é pulada.
 AUDD_API_TOKEN = os.getenv("AUDD_API_TOKEN", "").strip()
 # Liga/desliga o reconhecimento (padrão: ligado só no perfil música).
-RECONHECER_MUSICA = os.getenv("RECONHECER_MUSICA", "true" if EH_MUSICA else "false").strip().lower() in ("1", "true", "sim", "yes")
+_RECONHECER_ENV_TXT = os.getenv("RECONHECER_MUSICA")   # [PERFIL] None = decidir pelo perfil
+_RECONHECER_ENV = None if _RECONHECER_ENV_TXT is None else _RECONHECER_ENV_TXT.strip().lower() in ("1", "true", "sim", "yes")
+RECONHECER_MUSICA = EH_MUSICA if _RECONHECER_ENV is None else _RECONHECER_ENV
 # Busca a letra via API e usa como REFERÊNCIA para corrigir as palavras do ASR
 # (os timestamps continuam sendo os do Whisper).
 USAR_LETRA_OFICIAL = os.getenv("USAR_LETRA_OFICIAL", "true").strip().lower() in ("1", "true", "sim", "yes")
@@ -192,16 +232,9 @@ def _detectar_canais(caminho_entrada):
 
 
 # ---------------------------------------------------------------------------
-# CONVERSÃO PARA WAV PCM 16-BIT
+# CONVERSÃO PARA WAV PCM
 # ---------------------------------------------------------------------------
 def _converter_para_wav_lossless(caminho_entrada, caminho_saida, canais):
-    """
-    Converte o áudio para WAV PCM 16-bit.
-
-    Registra as características do áudio original e as características
-    do áudio convertido.
-    """
-
     # ---------------------------------------------------------------
     # 1. Descobrir informações do áudio original
     # ---------------------------------------------------------------
@@ -643,6 +676,22 @@ def _run_ffmpeg(stream, contexto=""):
 
 
 # ---------------------------------------------------------------------------
+# [EXPERIMENTO] CONVERSÃO MONO SEM NORMALIZAÇÃO DE LOUDNESS
+# ---------------------------------------------------------------------------
+# Usada no lugar das duas normalizações EBU R128 (single-pass e two-pass) quando
+# NORMALIZAR_LOUDNESS=false (configuração A). Mantém exatamente o MESMO formato de
+# saída (WAV PCM 16-bit, mono, `taxa_saida` Hz) — a única diferença é a ausência
+# do filtro `loudnorm` —, para que a comparação isole o efeito da normalização.
+def _converter_mono_sem_loudnorm(caminho_entrada, caminho_saida, taxa_saida=16000):
+    (
+        ffmpeg
+        .input(caminho_entrada)
+        .output(caminho_saida, vn=None, acodec='pcm_s16le', ac=1, ar=taxa_saida)
+        .run(quiet=True, overwrite_output=True)
+    )
+
+
+# ---------------------------------------------------------------------------
 # NORMALIZAÇÃO EBU R128 — SINGLE-PASS (reutilizável para qualquer mono:
 # tanto o caminho MONO original quanto cada canal separado do ESTÉREO)
 # ---------------------------------------------------------------------------
@@ -658,7 +707,12 @@ def _normalizar_mono_single_pass(caminho_entrada, caminho_saida, taxa_saida=1600
     longos. Por isso sempre fixamos `ar=taxa_saida`. Como diarização
     (pyannote) e transcrição (Groq) operam a 16kHz internamente, usar
     16kHz aqui não perde qualidade nenhuma — só evita o inchaço do loudnorm.
+
+    [EXPERIMENTO] Com NORMALIZAR_LOUDNESS=false, só converte (sem loudnorm).
     """
+    if not NORMALIZAR_LOUDNESS:
+        _converter_mono_sem_loudnorm(caminho_entrada, caminho_saida, taxa_saida)
+        return
     (
         ffmpeg
         .input(caminho_entrada)
@@ -833,7 +887,12 @@ def _medir_loudness_mono(caminho_entrada):
 
 
 def _normalizar_mono_two_pass(caminho_entrada, caminho_saida, taxa_saida=16000):
-    """Normalização EBU R128 two-pass (mede, depois aplica com precisão) para um canal mono."""
+    """Normalização EBU R128 two-pass (mede, depois aplica com precisão) para um canal mono.
+    [EXPERIMENTO] Com NORMALIZAR_LOUDNESS=false, só converte (sem loudnorm)."""
+    if not NORMALIZAR_LOUDNESS:
+        _converter_mono_sem_loudnorm(caminho_entrada, caminho_saida, taxa_saida)
+        return
+
     medidas = _medir_loudness_mono(caminho_entrada)
 
     # --- Blindagem contra canal silencioso (LFE, canal vazio em teste curto, etc.) ---
@@ -890,6 +949,10 @@ def _analisar_qualidade_audio(caminho_audio, rotulo=""):
 
     Gera alertas quando algo foge do esperado para o alvo de normalização
     usado no pipeline (I=-23 LUFS, TP=-2 dBTP).
+
+    [EXPERIMENTO] Com NORMALIZAR_LOUDNESS=false, os valores medidos são os do
+    áudio SEM normalização (e os alertas de loudness/true peak deixam de ser
+    comparados ao alvo de -23 LUFS / -2 dBTP).
     """
     loudness_integrada = true_peak = lra = None
     try:
@@ -922,10 +985,11 @@ def _analisar_qualidade_audio(caminho_audio, rotulo=""):
     alertas = []
     if proporcao_clipping > 0.001:
         alertas.append(f"possível clipping ({proporcao_clipping * 100:.2f}% das amostras no teto)")
-    if loudness_integrada is not None and loudness_integrada < -40:
-        alertas.append(f"áudio muito baixo mesmo após normalização ({loudness_integrada:.1f} LUFS)")
-    if true_peak is not None and true_peak > -1.0:
-        alertas.append(f"true peak acima do recomendado ({true_peak:.1f} dBTP, alvo é -2 dBTP)")
+    if NORMALIZAR_LOUDNESS:
+        if loudness_integrada is not None and loudness_integrada < -40:
+            alertas.append(f"áudio muito baixo mesmo após normalização ({loudness_integrada:.1f} LUFS)")
+        if true_peak is not None and true_peak > -1.0:
+            alertas.append(f"true peak acima do recomendado ({true_peak:.1f} dBTP, alvo é -2 dBTP)")
     if rms_dbfs is not None and rms_dbfs != float('-inf') and rms_dbfs < -50:
         alertas.append(f"RMS muito baixo ({rms_dbfs:.1f} dBFS) — possível trecho quase silencioso")
 
@@ -1808,6 +1872,216 @@ CORRECOES_TERMOS_CONHECIDOS = {
 # [NOVO] No perfil música, o dicionário político não se aplica.
 CORRECOES_ATIVAS = {} if EH_MUSICA else CORRECOES_TERMOS_CONHECIDOS
 
+# ---------------------------------------------------------------------------
+# [PERFIL] PERFIL DE ÁUDIO POR ARQUIVO (conversa x música)
+# ---------------------------------------------------------------------------
+# Os parâmetros que dependem do perfil (mono forçado, remoção de silêncio, prompt de
+# vocabulário, dicionário de correções, reconhecimento de música) são globais do módulo.
+# _aplicar_perfil() os reconfigura no início de CADA transcrição. É seguro porque
+# _fila_processamento garante que só UM job roda por vez.
+PERFIL_ATIVO = "musica" if EH_MUSICA else "conversa"
+
+
+def _aplicar_perfil(nome):
+    """
+    musica  : força mono (o mix tem a mesma voz nos dois canais), não corta silêncio
+              por energia (o beat parece fala), pode identificar a faixa na nuvem,
+              usa o prompt de trap e NÃO passa pelo corretor LLM / dicionário político.
+    conversa: NUNCA força mono: estéreo/multicanal seguem o fluxo por canal (um
+              falante por canal), remove silêncio no fluxo mono, usa o prompt de
+              entrevista, o corretor LLM e o dicionário de termos.
+    """
+    global PERFIL_ATIVO, EH_MUSICA, FORCAR_MONO, REMOVER_SILENCIO_MONO
+    global RECONHECER_MUSICA, PROMPT_VOCABULARIO_TRANSCRICAO, CORRECOES_ATIVAS
+    musica = (nome == "musica")
+    PERFIL_ATIVO = "musica" if musica else "conversa"
+    EH_MUSICA = musica
+    FORCAR_MONO = musica
+    REMOVER_SILENCIO_MONO = False if musica else _REMOVER_SILENCIO_ENV
+    RECONHECER_MUSICA = musica if _RECONHECER_ENV is None else _RECONHECER_ENV
+    if musica:
+        PROMPT_VOCABULARIO_TRANSCRICAO = os.getenv("PROMPT_VOCABULARIO_MUSICA") or PROMPT_MUSICA
+        CORRECOES_ATIVAS = {}
+    else:
+        PROMPT_VOCABULARIO_TRANSCRICAO = os.getenv("PROMPT_VOCABULARIO_TRANSCRICAO") or PROMPT_CONVERSA
+        CORRECOES_ATIVAS = CORRECOES_TERMOS_CONHECIDOS
+
+
+_aplicar_perfil("musica" if PERFIL_AUDIO == "musica" else "conversa")
+
+
+# ---------------------------------------------------------------------------
+# [EXPERIMENTO] APLICAÇÃO DA CONFIGURAÇÃO (loudness / pós-processamento) POR ARQUIVO
+# ---------------------------------------------------------------------------
+# Mesmo esquema do perfil: variáveis globais reconfiguradas no início de CADA
+# transcrição (seguro porque _fila_processamento roda um job por vez).
+def _aplicar_configuracao_experimental(normalizar_loudness=None, pos_processamento=None):
+    """
+    None = usa o valor do .env. Levanta ValueError para modo de pós-processamento
+    inválido (a rota já valida antes, então isso só pega chamadas diretas).
+    """
+    global NORMALIZAR_LOUDNESS, POS_PROCESSAMENTO
+    modo = _POS_PROCESSAMENTO_ENV if not pos_processamento else str(pos_processamento).strip().lower()
+    if modo not in POS_PROCESSAMENTOS_VALIDOS:
+        raise ValueError(
+            f"pos_processamento inválido: '{pos_processamento}'. "
+            f"Use um destes: {', '.join(POS_PROCESSAMENTOS_VALIDOS)}."
+        )
+    NORMALIZAR_LOUDNESS = _NORMALIZAR_LOUDNESS_ENV if normalizar_loudness is None else bool(normalizar_loudness)
+    POS_PROCESSAMENTO = modo
+    print(f"[CONFIG] normalização de loudness: {'LIGADA' if NORMALIZAR_LOUDNESS else 'DESLIGADA'} | "
+          f"pós-processamento de texto: {POS_PROCESSAMENTO}", flush=True)
+
+
+def _metadados_execucao(duracao_audio_s):
+    """Configuração efetivamente usada + duração do áudio, devolvidas junto do resultado
+    (rastreabilidade do experimento: cada saída diz com qual configuração foi gerada)."""
+    return {
+        "configuracao": {
+            "normalizar_loudness": NORMALIZAR_LOUDNESS,
+            "pos_processamento": POS_PROCESSAMENTO,
+            "reparar_fronteiras_llm": REPARAR_FRONTEIRAS_LLM,
+            "modelo_transcricao": MODELO_TRANSCRICAO,
+            "modelo_diarizacao": MODELO_DIARIZACAO,
+            "modelo_llm": LLM_MODELO,
+            "idioma": IDIOMA_TRANSCRICAO or "auto",
+        },
+        "duracao_audio_s": round(float(duracao_audio_s), 2),
+    }
+
+
+# ---------------------------------------------------------------------------
+# [PERFIL] DETECÇÃO AUTOMÁTICA (usada quando o perfil pedido é "auto")
+# ---------------------------------------------------------------------------
+# Analisa uma janela do MEIO do arquivo (evita vinheta/abertura) com 3 sinais:
+#   - pulso rítmico: autocorrelação do onset entre 60 e 200 BPM (beat constante = música)
+#   - dinâmica de energia: variação do envelope + proporção de pausas (fala tem pausas)
+#   - canais: estéreo com canais pouco correlacionados indica um falante por canal
+# pontuacao_musica >= LIMIAR_PERFIL_MUSICA   -> música
+# pontuacao_musica <  LIMIAR_PERFIL_CONVERSA -> conversa
+# entre os dois -> pergunta ao AudD (se houver token); sem token/sem match, decide em 0.5.
+# Os pesos/limiares são heurísticas: confira em arquivos seus e ajuste pelo .env.
+JANELA_ANALISE_PERFIL_S = float(os.getenv("JANELA_ANALISE_PERFIL_S", "90"))
+LIMIAR_PERFIL_MUSICA = float(os.getenv("LIMIAR_PERFIL_MUSICA", "0.65"))
+LIMIAR_PERFIL_CONVERSA = float(os.getenv("LIMIAR_PERFIL_CONVERSA", "0.35"))
+
+
+def _clip01(x):
+    return float(min(1.0, max(0.0, x)))
+
+
+def _extrair_janela_analise(caminho, saida, duracao_total, canais):
+    """Recorta a janela central em WAV 22,05 kHz, preservando L/R quando houver 2+ canais."""
+    janela = min(JANELA_ANALISE_PERFIL_S, float(duracao_total))
+    inicio = max(0.0, (float(duracao_total) - janela) / 2)
+    entrada = ffmpeg.input(caminho, ss=inicio, t=janela)
+    if canais >= 2:
+        fluxo = entrada.output(saida, vn=None, acodec='pcm_s16le', ar=22050,
+                               af='pan=stereo|c0=c0|c1=c1')
+    else:
+        fluxo = entrada.output(saida, vn=None, acodec='pcm_s16le', ac=1, ar=22050)
+    _run_ffmpeg(fluxo, "janela de análise do perfil")
+    return janela
+
+
+def _caracteristicas_perfil(caminho_janela):
+    dados, sr = sf.read(caminho_janela, always_2d=True)
+    dados = dados.astype(np.float32)
+    mono = dados.mean(axis=1)
+    if mono.size < sr * 3:
+        return None
+
+    # 1) Energia: variação do envelope e proporção de pausas (fala tem muitas pausas)
+    frame = int(0.025 * sr)
+    hop = int(0.010 * sr)
+    rms = librosa.feature.rms(y=mono, frame_length=frame, hop_length=hop)[0]
+    ref = float(np.percentile(rms, 95)) + 1e-12
+    db = 20 * np.log10(np.maximum(rms, 1e-8) / ref)
+    taxa_pausa = float(np.mean(db < -30.0))
+    variacao_energia = float(np.std(rms) / (np.mean(rms) + 1e-12))
+
+    # 2) Pulso rítmico: pico da autocorrelação do onset entre 200 e 60 BPM
+    hop_onset = 512
+    onset = librosa.onset.onset_strength(y=mono, sr=sr, hop_length=hop_onset)
+    onset = onset - onset.mean()
+    ac = librosa.autocorrelate(onset)
+    ac = ac / (ac[0] + 1e-12)
+    fps = sr / hop_onset
+    lag_min = max(1, int(fps * 60.0 / 200.0))
+    lag_max = int(fps * 60.0 / 60.0)
+    pulso = float(np.max(ac[lag_min:lag_max + 1])) if len(ac) > lag_max else 0.0
+
+    # 3) Canais: correlação entre L e R (só faz sentido com 2+ canais não vazios)
+    correlacao = None
+    if dados.shape[1] >= 2:
+        esq, dir_ = dados[:, 0], dados[:, 1]
+        if np.std(esq) > 1e-5 and np.std(dir_) > 1e-5:
+            c = float(np.corrcoef(esq, dir_)[0, 1])
+            correlacao = c if math.isfinite(c) else None
+
+    pontos_pulso = _clip01((pulso - 0.20) / 0.35)
+    pontos_fala = (_clip01((variacao_energia - 0.45) / 0.50) + _clip01(taxa_pausa / 0.10)) / 2
+    ajuste_canais = -0.25 if (correlacao is not None and correlacao < 0.25) else 0.0
+    pontuacao = _clip01(0.60 * pontos_pulso + 0.40 * (1.0 - pontos_fala) + ajuste_canais)
+
+    return {
+        "pulso_ritmico": round(pulso, 3),
+        "variacao_energia": round(variacao_energia, 3),
+        "taxa_pausa": round(taxa_pausa, 3),
+        "correlacao_canais": None if correlacao is None else round(correlacao, 3),
+        "pontuacao_musica": round(pontuacao, 3),
+    }
+
+
+def _decidir_perfil_auto(caminho_arquivo, duracao_total, canais):
+    """
+    Devolve {"perfil", "origem", "pontuacao_musica", "caracteristicas"[, "faixa"]}.
+    Nunca derruba o pipeline: qualquer falha vira log e o perfil cai para "conversa".
+    """
+    resultado = {"perfil": "conversa", "origem": "auto-falhou",
+                 "pontuacao_musica": None, "caracteristicas": None}
+    caminho_janela = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            caminho_janela = tmp.name
+        janela = _extrair_janela_analise(caminho_arquivo, caminho_janela, duracao_total, canais)
+        carac = _caracteristicas_perfil(caminho_janela)
+
+        if carac is None:
+            resultado["origem"] = "auto-audio-curto"
+        else:
+            pontos = carac["pontuacao_musica"]
+            resultado["pontuacao_musica"] = pontos
+            resultado["caracteristicas"] = carac
+
+            if pontos >= LIMIAR_PERFIL_MUSICA:
+                resultado.update(perfil="musica", origem="auto-heuristica")
+            elif pontos < LIMIAR_PERFIL_CONVERSA:
+                resultado.update(perfil="conversa", origem="auto-heuristica")
+            else:
+                # Zona duvidosa: a impressão digital na nuvem decide, se possível.
+                info = None
+                if AUDD_API_TOKEN:
+                    info = _identificar_musica(caminho_arquivo, caminho_janela, janela)
+                if info and info.get("titulo"):
+                    resultado.update(perfil="musica", origem="auto-fingerprint",
+                                     faixa=f"{info.get('artista')} - {info.get('titulo')}")
+                else:
+                    resultado.update(perfil="musica" if pontos >= 0.5 else "conversa",
+                                     origem="auto-heuristica-ambigua")
+    except Exception as e:
+        print(f"    [PERFIL] Falha na detecção automática ({e}); usando conversa.", flush=True)
+    finally:
+        if caminho_janela and os.path.exists(caminho_janela):
+            os.remove(caminho_janela)
+
+    pts = resultado["pontuacao_musica"]
+    txt_pts = "n/d" if pts is None else f"{pts:.2f}"
+    print(f"    [PERFIL] auto -> {resultado['perfil']} | origem: {resultado['origem']} | "
+          f"pontuação música: {txt_pts} | {resultado['caracteristicas']}", flush=True)
+    return resultado
+
+
 
 def _preparar_audio_para_transcricao_groq(caminho_entrada):
     caminho_comprimido = caminho_entrada.rsplit('.', 1)[0] + '_groq.flac'
@@ -1898,7 +2172,7 @@ def _chamar_groq_transcricao(caminho_arquivo, prompt_vocabulario=None):
         return client.audio.transcriptions.create(**argumentos)
 
 
-def _transcrever_com_timestamps(audio_path, prompt_vocabulario=PROMPT_VOCABULARIO_TRANSCRICAO):
+def _transcrever_com_timestamps(audio_path, prompt_vocabulario=None):
     """
     Transcreve `audio_path` (mono, já normalizado) via Groq. Se o arquivo
     comprimido (16kHz mono FLAC) couber no limite de 25MB, envia direto.
@@ -1909,6 +2183,8 @@ def _transcrever_com_timestamps(audio_path, prompt_vocabulario=PROMPT_VOCABULARI
     `prompt_vocabulario` é repassado à Groq em CADA chunk (o contexto do
     prompt não "acumula" entre chamadas, então precisa ir em todas).
     """
+    if prompt_vocabulario is None:   # [PERFIL] resolve na chamada: o perfil muda por arquivo
+        prompt_vocabulario = PROMPT_VOCABULARIO_TRANSCRICAO
     caminho_upload = _preparar_audio_para_transcricao_groq(audio_path)
     tamanho_mb = os.path.getsize(caminho_upload) / (1024 * 1024)
     print(f"    Tamanho comprimido para Groq: {tamanho_mb:.2f} MB (16kHz mono FLAC, "
@@ -1957,6 +2233,75 @@ def _transcrever_com_timestamps(audio_path, prompt_vocabulario=PROMPT_VOCABULARI
         )
 
     return todas_palavras, todos_segmentos
+
+
+# ---------------------------------------------------------------------------
+# [NOVO] CHAMADA AO LLM (Groq) COM RETRY EM RATE LIMIT (429)
+# ---------------------------------------------------------------------------
+# O plano gratuito da Groq limita tokens por minuto (TPM) por modelo. Como o
+# pipeline faz uma chamada por bloco de fala (correção de texto) e outra por
+# troca de falante (reparo de fronteira), áudios com muitos blocos estouram
+# esse limite. Esta função centraliza TODAS as chamadas ao LLM: quando recebe
+# 429, espera o tempo sugerido pela própria API e tenta de novo. Se o limite
+# for DIÁRIO (espera sugerida muito longa) ou as tentativas acabarem, levanta
+# a exceção — quem chamou decide o fallback (ver _corrigir_blocos).
+LLM_MODELO = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-120b")
+LLM_MAX_TENTATIVAS = int(os.getenv("LLM_MAX_TENTATIVAS", "6"))
+LLM_ESPERA_MAXIMA_S = float(os.getenv("LLM_ESPERA_MAXIMA_S", "90"))   # acima disso, desiste (limite diário)
+MINIMO_PALAVRAS_LLM = 3   # blocos menores que isso não gastam chamada de LLM
+
+
+def _segundos_sugeridos(mensagem):
+    """
+    Lê o 'Please try again in 180ms' / '2.5s' / '6m7.2s' da mensagem de erro
+    da Groq e devolve a espera em segundos (ou None se não achar).
+    """
+    m = re.search(r'try again in\s+([0-9hms.]+?)(?:\.\s|\s|$)', mensagem)
+    if not m:
+        return None
+    total, achou = 0.0, False
+    for valor, unidade in re.findall(r'(\d+(?:\.\d+)?)(ms|h|m|s)', m.group(1)):
+        achou = True
+        v = float(valor)
+        total += {"ms": v / 1000, "s": v, "m": v * 60, "h": v * 3600}[unidade]
+    return total if achou else None
+
+
+def _chamar_llm(prompt, max_tokens=1024):
+    """
+    Chamada ao LLM da Groq com retry automático em rate limit (429): espera o
+    tempo sugerido pela API (ou um backoff crescente) e tenta de novo.
+    Levanta exceção se: acabaram as tentativas, a espera sugerida é longa
+    demais, ou a resposta veio vazia/cortada pelo limite de tokens.
+    """
+    espera = 2.0
+    for tentativa in range(1, LLM_MAX_TENTATIVAS + 1):
+        try:
+            extras = {}
+            if "gpt-oss" in LLM_MODELO:
+                # menos tokens gastos "pensando" = mais rápido e menos TPM consumido
+                extras["extra_body"] = {"reasoning_effort": "low"}
+            resp = client.chat.completions.create(
+                model=LLM_MODELO,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_completion_tokens=max_tokens,
+                **extras,
+            )
+            escolha = resp.choices[0]
+            conteudo = (escolha.message.content or "").strip()
+            if escolha.finish_reason == "length" or not conteudo:
+                raise RuntimeError("resposta do LLM vazia ou cortada pelo limite de tokens")
+            return conteudo
+        except RateLimitError as e:
+            sugerido = _segundos_sugeridos(str(e))
+            if tentativa == LLM_MAX_TENTATIVAS or (sugerido is not None and sugerido > LLM_ESPERA_MAXIMA_S):
+                raise
+            pausa = max((sugerido or 0.0) + 0.5, espera)
+            print(f"    [LLM] Rate limit (tentativa {tentativa}/{LLM_MAX_TENTATIVAS}). "
+                  f"Aguardando {pausa:.1f}s...", flush=True)
+            time.sleep(pausa)
+            espera = min(espera * 2, 30.0)
 
 
 # ---------------------------------------------------------------------------
@@ -2068,12 +2413,8 @@ def _reparar_fronteiras_llm(palavras, gap_max=GAP_MAXIMO_FRONTEIRA_LLM, janela=6
             "de A pertence ao início de B). Se a fronteira estiver correta, responda 0 e 0."
         )
         try:
-            resp = client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-            )
-            dec = _extrair_json_objeto(resp.choices[0].message.content.strip())
+            # [AJUSTADO] chamada centralizada com retry em rate limit
+            dec = _extrair_json_objeto(_chamar_llm(prompt, max_tokens=500))
             n = max(0, min(3, int(dec.get("a_para_b", 0)), i - ini_a - 1))
             m = max(0, min(3, int(dec.get("b_para_a", 0)), fim_b - i - 1))
             if n and m:
@@ -2098,45 +2439,77 @@ def _reparar_fronteiras_llm(palavras, gap_max=GAP_MAXIMO_FRONTEIRA_LLM, janela=6
 # ---------------------------------------------------------------------------
 # COMBINAÇÃO: diarização + transcrição, por palavra
 # ---------------------------------------------------------------------------
+# [FRONTEIRA] Cada bloco devolvido agora traz também "palavras_fronteira": as
+# palavras em dúvida (movidas por um reparo de fronteira OU coladas numa troca
+# de falante), usadas pela página historico.html.
 def _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao):
     palavras_com_falante = []
     for palavra in palavras_transcricao:
         inicio_p, fim_p = palavra['start'], palavra['end']
-        falante = _falante_da_palavra(inicio_p, fim_p, segmentos_falantes)   # [AJUSTADO]
+        falante = _falante_da_palavra(inicio_p, fim_p, segmentos_falantes)
         palavras_com_falante.append({
             "inicio": round(inicio_p, 2), "fim": round(fim_p, 2),
-            "falante": falante, "palavra": palavra['word'].strip()
+            "falante": falante, "palavra": palavra['word'].strip(),
+            "falante_original": falante,   # [FRONTEIRA] falante antes dos reparos
+            "motivos": [],                 # [FRONTEIRA] por que a palavra é duvidosa
         })
 
     if not palavras_com_falante:
         return []
 
-    # [NOVO] Reparo das fronteiras de turno ANTES de agrupar em blocos
+    def _registrar_mudancas(motivo, falantes_antes):
+        for p, antes in zip(palavras_com_falante, falantes_antes):
+            if p["falante"] != antes:
+                p["motivos"].append(motivo)
+
+    # Reparo das fronteiras de turno ANTES de agrupar em blocos
+    antes = [p["falante"] for p in palavras_com_falante]
     palavras_com_falante = _reparar_fronteiras_por_regra(palavras_com_falante)
+    _registrar_mudancas("movida por regra (né/bom)", antes)
+
     if REPARAR_FRONTEIRAS_LLM:
+        antes = [p["falante"] for p in palavras_com_falante]
         palavras_com_falante = _reparar_fronteiras_llm(palavras_com_falante)
+        _registrar_mudancas("movida pelo LLM", antes)
+
+    n = len(palavras_com_falante)
+
+    # [FRONTEIRA] Palavras em dúvida = movidas por algum reparo OU coladas numa troca de falante
+    duvidosas = {}
+    for i, p in enumerate(palavras_com_falante):
+        if p["motivos"]:
+            duvidosas[i] = list(p["motivos"])
+    for i in range(1, n):
+        a, b = palavras_com_falante[i - 1], palavras_com_falante[i]
+        if a["falante"] != b["falante"] and (b["inicio"] - a["fim"]) < GAP_MAXIMO_FRONTEIRA_LLM:
+            for k in (i - 1, i):
+                lista = duvidosas.setdefault(k, [])
+                if "na fronteira do turno" not in lista:
+                    lista.append("na fronteira do turno")
 
     blocos = []
-    bloco_atual = {
-        "inicio": palavras_com_falante[0]["inicio"], "fim": palavras_com_falante[0]["fim"],
-        "falante": palavras_com_falante[0]["falante"], "palavras": [palavras_com_falante[0]["palavra"]]
-    }
-
-    for p in palavras_com_falante[1:]:
-        if p["falante"] == bloco_atual["falante"]:
-            bloco_atual["fim"] = p["fim"]
-            bloco_atual["palavras"].append(p["palavra"])
-        else:
+    inicio_bloco = 0
+    for i in range(1, n + 1):
+        if i == n or palavras_com_falante[i]["falante"] != palavras_com_falante[inicio_bloco]["falante"]:
+            grupo = palavras_com_falante[inicio_bloco:i]
             blocos.append({
-                "inicio": bloco_atual["inicio"], "fim": bloco_atual["fim"],
-                "falante": bloco_atual["falante"], "texto": " ".join(bloco_atual["palavras"])
+                "inicio": grupo[0]["inicio"],
+                "fim": grupo[-1]["fim"],
+                "falante": grupo[0]["falante"],
+                "texto": " ".join(p["palavra"] for p in grupo),
+                "palavras_fronteira": [
+                    {
+                        "palavra": palavras_com_falante[k]["palavra"],
+                        "inicio": palavras_com_falante[k]["inicio"],
+                        "fim": palavras_com_falante[k]["fim"],
+                        "motivo": " + ".join(duvidosas[k]),
+                        "de": palavras_com_falante[k]["falante_original"],
+                        "para": palavras_com_falante[k]["falante"],
+                    }
+                    for k in range(inicio_bloco, i) if k in duvidosas
+                ],
             })
-            bloco_atual = {"inicio": p["inicio"], "fim": p["fim"], "falante": p["falante"], "palavras": [p["palavra"]]}
-
-    blocos.append({
-        "inicio": bloco_atual["inicio"], "fim": bloco_atual["fim"],
-        "falante": bloco_atual["falante"], "texto": " ".join(bloco_atual["palavras"])
-    })
+            inicio_bloco = i
 
     return blocos
 
@@ -2294,12 +2667,10 @@ def _corrigir_texto(texto):
         f"Texto original: {texto}"
     )
 
-    resposta = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0
-    )
-    return resposta.choices[0].message.content.strip()
+    # [AJUSTADO] chamada centralizada com retry em rate limit. O teto de tokens
+    # cresce com o tamanho do bloco (a resposta é o texto inteiro de volta).
+    max_tokens = max(600, min(4000, int(len(texto) / 2.5) + 500))
+    return _chamar_llm(prompt, max_tokens=max_tokens)
 
 
 def _remover_artefatos_gagueira(texto):
@@ -2397,15 +2768,45 @@ def _capitalizar_texto_bruto(texto):
 
 
 def _corrigir_blocos(blocos):
+    """
+    Pós-processamento de texto, controlado por POS_PROCESSAMENTO:
+      "nenhum"    -> texto_corrigido == texto (saída do ASR intacta; configurações A e B)
+      "completo"  -> regras locais + correção por LLM
+      "so_llm"    -> só a correção por LLM (+ capitalização de fallback)
+      "so_regras" -> só as regras locais (gagueira, espaçamento, dicionário de termos)
+    O campo "texto" nunca é alterado: ele é a saída "antes", e "texto_corrigido" a "depois".
+    """
+    if POS_PROCESSAMENTO == "nenhum":
+        for bloco in blocos:
+            bloco["texto_corrigido"] = bloco["texto"]
+        return blocos
+
+    usar_llm = POS_PROCESSAMENTO in ("completo", "so_llm")
+    usar_regras = POS_PROCESSAMENTO in ("completo", "so_regras")
+
     for bloco in blocos:
         # [NOVO] remove artefatos de gagueira ANTES do LLM
-        texto_bruto = _remover_artefatos_gagueira(bloco["texto"])
+        texto_bruto = _remover_artefatos_gagueira(bloco["texto"]) if usar_regras else bloco["texto"]
 
         if EH_MUSICA:
             # [NOVO] Perfil música: sem LLM (ele "normaliza" gírias para português padrão)
             texto_corrigido = _capitalizar_texto_bruto(texto_bruto)
+        elif not usar_llm:
+            texto_corrigido = texto_bruto
+        elif len(_tokenizar_comparacao(texto_bruto)) < MINIMO_PALAVRAS_LLM:
+            # [NOVO] Bloco curtíssimo ("Né?", "Certo."): não vale gastar uma chamada
+            # (o prompt é bem maior que o texto) — só capitaliza.
+            texto_corrigido = _capitalizar_texto_bruto(texto_bruto)
         else:
-            texto_corrigido = _corrigir_texto(texto_bruto)
+            # [AJUSTADO] Se o LLM estiver indisponível (rate limit esgotado, limite
+            # diário, resposta cortada...), o bloco cai no fallback em vez de derrubar
+            # a transcrição inteira.
+            try:
+                texto_corrigido = _corrigir_texto(texto_bruto)
+            except Exception as e:
+                print(f"    [CORREÇÃO] LLM indisponível ({type(e).__name__}); usando texto bruto "
+                      f"com capitalização básica no bloco '{bloco['texto'][:40]}...'", flush=True)
+                texto_corrigido = _capitalizar_texto_bruto(texto_bruto)
 
             if not _texto_preserva_palavras(texto_bruto, texto_corrigido):
                 print(f"    [CORREÇÃO] Aviso: correção por LLM alterou demais o "
@@ -2413,8 +2814,9 @@ def _corrigir_blocos(blocos):
                       f"para o texto original (com capitalização básica).", flush=True)
                 texto_corrigido = _capitalizar_texto_bruto(texto_bruto)
 
-        texto_corrigido = _reparar_espacamento_generico(texto_corrigido)
-        texto_corrigido = _aplicar_correcoes_termos(texto_corrigido, CORRECOES_ATIVAS)
+        if usar_regras:
+            texto_corrigido = _reparar_espacamento_generico(texto_corrigido)
+            texto_corrigido = _aplicar_correcoes_termos(texto_corrigido, CORRECOES_ATIVAS)
 
         bloco["texto_corrigido"] = texto_corrigido
     return blocos
@@ -2423,14 +2825,30 @@ def _corrigir_blocos(blocos):
 # ---------------------------------------------------------------------------
 # PIPELINE PRINCIPAL
 # ---------------------------------------------------------------------------
-def transcrever_arquivo(caminho_original, top_db=40):
+def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
+                        normalizar_loudness=None, pos_processamento=None):
     """
     Recebe um caminho de arquivo já existente em disco e retorna um
     dicionário {"segmentos": [...], "qualidade": [...]} — "qualidade" traz
     um relatório de diagnóstico por canal normalizado (vazio quando o
     fluxo não passa por normalização, como no fallback de WAV puro).
+
+    `normalizar_loudness` / `pos_processamento`: sobrescrevem, só nesta chamada,
+    os padrões do .env (None = usa o .env). Ver "[EXPERIMENTO]" no topo.
     """
     extensao = os.path.splitext(caminho_original)[1].lower()
+    # [PERFIL] perfil pedido (parâmetro > .env). Em "auto" começa como conversa e é
+    # refinado após a detecção; em perfil fixo, vale desde já.
+    pedido_perfil = (perfil or PERFIL_AUDIO or "auto").strip().lower()
+    if pedido_perfil not in ("auto", "conversa", "musica"):
+        pedido_perfil = "auto"
+    _aplicar_perfil("musica" if pedido_perfil == "musica" else "conversa")
+    _aplicar_configuracao_experimental(normalizar_loudness, pos_processamento)   # [EXPERIMENTO]
+    decisao_perfil = {
+        "perfil": PERFIL_ATIVO,
+        "origem": "manual" if pedido_perfil != "auto" else "padrao",
+        "pedido": pedido_perfil,
+    }
     print(f"[1/10] Copiando arquivo temporário...")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=extensao) as tmp:
@@ -2460,7 +2878,7 @@ def transcrever_arquivo(caminho_original, top_db=40):
         if duracao_bruta > LIMITE_SEGUNDOS:
             raise ValueError(f"Áudio muito longo: {int(duracao_bruta)}s. Limite: {LIMITE_SEGUNDOS}s (1 hora).")
 
-        if extensao in ('.mp4', '.mp3'):
+        if extensao in ('.mp4', '.mp3', '.m4a', '.wav', '.webm', '.ogg', '.mkv', '.mov'):
             print(f"[3/10] Verificando canais de áudio...")
             info_canais = _detectar_canais(tmp_path)
             canais = info_canais["canais"]
@@ -2470,8 +2888,16 @@ def transcrever_arquivo(caminho_original, top_db=40):
 
             # [NOVO] Perfil música / FORCAR_MONO: downmix para mono na conversão
             # (evita C0/C1 redundantes com a mesma voz).
+            # [PERFIL] Detecção automática do perfil deste arquivo (antes de decidir mono/canais)
+            if pedido_perfil == "auto":
+                print(f"[3/10] Detectando perfil de áudio (conversa x música)...", flush=True)
+                decisao_perfil = _decidir_perfil_auto(tmp_path, duracao_bruta, canais)
+                decisao_perfil["pedido"] = "auto"
+                _aplicar_perfil(decisao_perfil["perfil"])
+            print(f"[3/10] Perfil de áudio: {PERFIL_ATIVO} ({decisao_perfil['origem']})", flush=True)
+
             if FORCAR_MONO and tipo_canal != "mono":
-                print(f"[3/10] Perfil '{PERFIL_AUDIO}': forçando downmix para MONO "
+                print(f"[3/10] Perfil '{PERFIL_ATIVO}': forçando downmix para MONO "
                       f"(evita C0/C1 redundantes).", flush=True)
                 canais = 1
                 tipo_canal = "mono"
@@ -2494,7 +2920,7 @@ def transcrever_arquivo(caminho_original, top_db=40):
                     )
 
             # [NOVO] Isolamento de vocais (Demucs) — opcional, pesado
-            if ISOLAR_VOCAIS_DEMUCS:
+            if ISOLAR_VOCAIS_DEMUCS and EH_MUSICA:   # [PERFIL] Demucs só em música (conversa não vira mono)
                 print(f"[4/10] Isolando vocais com Demucs (pode demorar)...", flush=True)
                 pasta_demucs = tempfile.mkdtemp()
                 try:
@@ -2597,7 +3023,9 @@ def transcrever_arquivo(caminho_original, top_db=40):
                 return {
                     "segmentos": resultado,
                     "qualidade": relatorios_qualidade_estereo,
+                    "perfil": decisao_perfil,
                     "informacoes_audio": informacoes_conversao,
+                    **_metadados_execucao(duracao_bruta),
                 }
 
             elif tipo_canal == "multicanal":
@@ -2607,7 +3035,9 @@ def transcrever_arquivo(caminho_original, top_db=40):
                 return {
                     "segmentos": resultado,
                     "qualidade": qualidade_multicanal,
+                    "perfil": decisao_perfil,
                     "informacoes_audio": informacoes_conversao,
+                    **_metadados_execucao(duracao_bruta),
                 }
 
             else:
@@ -2663,7 +3093,8 @@ def transcrever_arquivo(caminho_original, top_db=40):
                 palavras_transcricao = _remapear_palavras(palavras_transcricao, converter_tempo_mono)
 
                 # [NOVO] Música identificada com letra: usa a letra como referência de texto
-                if info_musica and info_musica.get("letra"):
+                # [EXPERIMENTO] (pulado quando POS_PROCESSAMENTO="nenhum": altera as palavras do ASR)
+                if info_musica and info_musica.get("letra") and POS_PROCESSAMENTO != "nenhum":
                     palavras_transcricao = _alinhar_palavras_com_letra(
                         palavras_transcricao, info_musica["letra"]
                     )
@@ -2684,8 +3115,10 @@ def transcrever_arquivo(caminho_original, top_db=40):
                 return {
                     "segmentos": resultado,
                     "qualidade": [relatorio_qualidade_mono],
+                    "perfil": decisao_perfil,
                     "informacoes_audio": informacoes_conversao,
                     "musica": _resumo_musica(info_musica),
+                    **_metadados_execucao(duracao_bruta),
                 }
 
         # Caso o arquivo não seja .mp4/.mp3 (ex: .wav puro) — fluxo mínimo direto.
@@ -2713,7 +3146,8 @@ def transcrever_arquivo(caminho_original, top_db=40):
             print(f"[{item['inicio']}s - {item['fim']}s] canal={item['canal']} "
                   f"{item['falante_global']} (local: {item['falante_local']}): {item['texto_corrigido']}")
 
-        return {"segmentos": resultado, "qualidade": [], "informacoes_audio": None}
+        return {"segmentos": resultado, "qualidade": [], "informacoes_audio": None,
+                "perfil": decisao_perfil, **_metadados_execucao(duracao_bruta)}
 
     finally:
         os.remove(tmp_path)
@@ -2741,34 +3175,170 @@ def transcrever_arquivo(caminho_original, top_db=40):
                     os.remove(p)
 
 
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # limite de upload: 500 MB
+
+EXTENSOES_PERMITIDAS = {'.mp3', '.mp4', '.m4a', '.wav', '.webm', '.ogg', '.mkv', '.mov'}
+VALIDADE_JOB_SEGUNDOS = 60 * 60  # jobs antigos são descartados da memória após 1h
+
+# Estado dos jobs em memória: {job_id: {"estado": ..., "resultado": ..., "erro": ...}}
+JOBS = {}
+_jobs_lock = threading.Lock()
+
+# Roda UMA transcrição por vez (pyannote + Demucs disputam a mesma GPU/VRAM).
+# Quem chegar enquanto outra roda fica no estado "na_fila".
+_fila_processamento = threading.Semaphore(1)
+
+
+def _sanitizar_json(obj):
+    """
+    jsonify NÃO aceita -inf/NaN como JSON válido (o navegador quebra no
+    response.json()). O relatório de qualidade pode ter pico/RMS = -inf em
+    áudio silencioso, então convertemos esses valores para None. Também
+    converte tipos do numpy para tipos nativos do Python.
+    """
+    if isinstance(obj, dict):
+        return {k: _sanitizar_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitizar_json(v) for v in obj]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, (np.floating, float)):
+        v = float(obj)
+        return v if math.isfinite(v) else None
+    return obj
+
+
+def _atualizar_job(job_id, **campos):
+    with _jobs_lock:
+        if job_id in JOBS:
+            JOBS[job_id].update(campos)
+
+
+def _limpar_jobs_antigos():
+    agora = time.time()
+    with _jobs_lock:
+        for jid in [j for j, d in JOBS.items() if agora - d["criado_em"] > VALIDADE_JOB_SEGUNDOS]:
+            del JOBS[jid]
+
+
+def _executar_job(job_id, caminho, perfil=None, normalizar_loudness=None, pos_processamento=None):
+    """Roda em thread de background: processa o arquivo e grava o resultado no job."""
+    with _fila_processamento:
+        _atualizar_job(job_id, estado="processando")
+        try:
+            # Tempo do pipeline COMPLETO (conversão, normalização, diarização, upload + transcrição
+            # na Groq, correção). Não inclui a espera na fila; inclui eventuais esperas de rate limit.
+            t0 = time.perf_counter()
+            resultado = transcrever_arquivo(
+                caminho, perfil=perfil,
+                normalizar_loudness=normalizar_loudness,
+                pos_processamento=pos_processamento,
+            )
+            tempo_s = time.perf_counter() - t0
+            duracao_s = resultado.get("duracao_audio_s")
+            resultado["tempo_processamento_s"] = round(tempo_s, 2)
+            # fator de tempo real = tempo de processamento / duração do áudio
+            resultado["fator_tempo_real"] = round(tempo_s / duracao_s, 3) if duracao_s else None
+            _atualizar_job(job_id, estado="concluido", resultado=_sanitizar_json(resultado))
+        except ValueError as e:
+            # erros "esperados" (ex: áudio longo demais, sem trilha de áudio)
+            _atualizar_job(job_id, estado="erro", erro=str(e))
+        except Exception as e:
+            print(f"ERRO inesperado no job {job_id}: {e}", flush=True)
+            _atualizar_job(job_id, estado="erro", erro=f"Falha interna ao transcrever: {e}")
+        finally:
+            if os.path.exists(caminho):
+                os.remove(caminho)
+
+
+def _ler_booleano_opcional(texto):
+    """None se vazio/ausente; True/False se reconhecido; ValueError caso contrário."""
+    if texto is None or str(texto).strip() == "":
+        return None
+    t = str(texto).strip().lower()
+    if t in ("1", "true", "sim", "yes", "on"):
+        return True
+    if t in ("0", "false", "nao", "não", "no", "off"):
+        return False
+    raise ValueError(f"valor booleano inválido: '{texto}'")
+
+
 @app.route('/transcrever', methods=['POST'])
 def transcrever():
-    arquivo = request.files['file']
+    """
+    Recebe o arquivo, agenda o processamento e responde NA HORA com um job_id.
+    Campos opcionais (form ou query string):
+      perfil               auto | conversa | musica
+      normalizar_loudness  true | false          (padrão: NORMALIZAR_LOUDNESS do .env)
+      pos_processamento    completo | nenhum | so_llm | so_regras   (padrão: POS_PROCESSAMENTO do .env)
+    """
+    arquivo = request.files.get('file')
+    if arquivo is None or not arquivo.filename:
+        return jsonify({"erro": "Nenhum arquivo enviado (campo 'file')."}), 400
+
     extensao = os.path.splitext(arquivo.filename)[1].lower()
+    if extensao not in EXTENSOES_PERMITIDAS:
+        return jsonify({"erro": f"Formato não suportado: {extensao or '(sem extensão)'}"}), 400
+
+    def _param(nome):
+        return request.form.get(nome) or request.args.get(nome)
+
+    perfil_pedido = (_param('perfil') or '').strip().lower() or None
+    if perfil_pedido not in (None, 'auto', 'conversa', 'musica'):
+        return jsonify({"erro": "Perfil inválido: use 'auto', 'conversa' ou 'musica'."}), 400
+
+    try:
+        normalizar_loudness = _ler_booleano_opcional(_param('normalizar_loudness'))
+    except ValueError as e:
+        return jsonify({"erro": f"normalizar_loudness: {e}. Use true ou false."}), 400
+
+    pos_processamento = (_param('pos_processamento') or '').strip().lower() or None
+    if pos_processamento not in (None,) + POS_PROCESSAMENTOS_VALIDOS:
+        return jsonify({"erro": f"pos_processamento inválido. Use: {', '.join(POS_PROCESSAMENTOS_VALIDOS)}."}), 400
+
+    _limpar_jobs_antigos()
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=extensao) as tmp:
         arquivo.save(tmp.name)
         tmp_path = tmp.name
 
-    try:
-        resultado = transcrever_arquivo(tmp_path)
-        return jsonify(resultado)  # já vem como {"segmentos": [...], "qualidade": [...]}
-    except ValueError as e:
-        return jsonify({"erro": str(e)}), 400
-    except Exception as e:  # [NOVO] erros inesperados viram JSON em vez de página HTML de erro
-        print(f"ERRO inesperado em /transcrever: {e}", flush=True)
-        return jsonify({"erro": f"Falha interna ao transcrever: {e}"}), 500
-    finally:
-        os.remove(tmp_path)
+    job_id = uuid.uuid4().hex
+    with _jobs_lock:
+        JOBS[job_id] = {
+            "estado": "na_fila",
+            "criado_em": time.time(),
+            "nome_arquivo": arquivo.filename,
+        }
+
+    threading.Thread(
+        target=_executar_job,
+        args=(job_id, tmp_path, perfil_pedido, normalizar_loudness, pos_processamento),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id}), 202
+
+
+@app.route('/status/<job_id>', methods=['GET'])
+def status_job(job_id):
+    """O front consulta esta rota até o estado virar 'concluido' ou 'erro'."""
+    with _jobs_lock:
+        job = JOBS.get(job_id)
+        job = dict(job) if job else None
+    if job is None:
+        return jsonify({"erro": "Job não encontrado (o servidor pode ter sido reiniciado)."}), 404
+    return jsonify(job)
 
 
 if __name__ == '__main__':
-    TESTE_LOCAL = True
+    # Por padrão SOBE O SERVIDOR. Para rodar só o teste local:
+    #   Windows (PowerShell):  $env:TESTE_LOCAL="1"; python app.py
+    #   Windows (cmd):         set TESTE_LOCAL=1 && python app.py
+    TESTE_LOCAL = os.getenv("TESTE_LOCAL", "0").strip().lower() in ("1", "true", "sim", "yes")
 
     if TESTE_LOCAL:
         diretorio_script = os.path.dirname(os.path.abspath(__file__))
         pasta_testes = os.path.join(os.path.dirname(diretorio_script), "Teste Video")
-        arquivos_teste = ["Teste1.mp4"]
+        arquivos_teste = ["Teste2.mp4"]
 
         print(f"\n[DIAGNÓSTICO] Perfil de áudio: {PERFIL_AUDIO} "
               f"(forçar mono: {FORCAR_MONO}, demucs: {ISOLAR_VOCAIS_DEMUCS})")
@@ -2803,4 +3373,7 @@ if __name__ == '__main__':
                 status = "FALHOU"
             print(f"  {nome_arquivo}: {status}")
     else:
-        app.run(debug=True)
+        # debug=False de propósito: com debug=True o reloader do Flask executa o
+        # script DUAS vezes (reimportando torch/pyannote, minutos a mais) e
+        # reinicia o servidor ao mexer em arquivos, o que derruba os jobs em andamento.
+        app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

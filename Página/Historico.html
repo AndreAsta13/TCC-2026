@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Histórico — Transcreva.IA</title>
+    <link rel="icon" type="image/png" href="../Image/image.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .texto-transcricao { white-space: pre-wrap; }
+    </style>
+</head>
+
+<body class="bg-[#0b0f19] text-gray-100 min-h-screen relative overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+
+    <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[500px] bg-gradient-to-tr from-indigo-600/20 via-emerald-500/15 to-purple-600/20 blur-[150px] -z-10 pointer-events-none rounded-full"></div>
+    <div class="fixed inset-0 -z-10 opacity-[0.03] bg-[linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
+
+    <div id="toast" class="fixed top-5 right-5 z-50"></div>
+
+    <header class="w-full border-b border-white/10 backdrop-blur-xl bg-[#0b0f19]/70 sticky top-0 z-40">
+        <div class="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
+            <a href="ground_truth.html" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2 rounded-xl text-sm flex items-center gap-2 transition">
+                ← Voltar ao Ground Truth
+            </a>
+            <span class="text-xl font-extrabold tracking-tight text-white">
+                Transcreva<span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-emerald-400">.IA</span>
+            </span>
+        </div>
+    </header>
+
+    <!-- Conteúdo centralizado -->
+    <main class="max-w-3xl mx-auto px-6 py-10 space-y-6">
+        <div class="text-center space-y-2">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Histórico de transcrições</h1>
+            <p class="text-gray-400 text-sm">
+                Pilha (último a entrar, primeiro a sair): cada transcrição nova é somada no topo e as anteriores continuam salvas.
+            </p>
+            <div id="resumo" class="text-xs text-indigo-300 font-semibold"></div>
+        </div>
+
+        <div id="lista" class="space-y-6">
+            <div class="text-center text-gray-400 text-sm py-10">Carregando histórico...</div>
+        </div>
+    </main>
+
+    <footer class="border-t border-white/10 py-6 bg-[#080b12]/50 text-center text-gray-500 text-xs mt-12">
+        <p>© 2026 Transcreva.IA — Projeto Acadêmico (TCC)</p>
+    </footer>
+
+<script>
+const API = 'http://localhost:3000';
+const CHAVE_PENDENTES = 'transcricoes_pendentes';
+let toastTimer = null;
+
+/* ── utilidades ─────────────────────────────────────────────────────────── */
+function toast(msg, tipo = 'success') {
+    const t = document.getElementById('toast');
+    const cores = { success: 'bg-emerald-600', error: 'bg-red-600' };
+    t.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = `${cores[tipo] || cores.success} text-white text-sm font-semibold px-4 py-3 rounded-xl shadow-lg max-w-sm`;
+    el.textContent = msg;
+    t.appendChild(el);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.innerHTML = ''; }, 3200);
+}
+
+function formatarTempo(segundos) {
+    const t = Math.max(0, Math.floor(segundos || 0));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+    const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+    return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function el(tag, classe, texto) {
+    const e = document.createElement(tag);
+    if (classe) e.className = classe;
+    if (texto !== undefined && texto !== null) e.textContent = texto;
+    return e;
+}
+
+/* ── WER / CER (mesma normalização do servidor: minúsculas, sem pontuação) ─ */
+function normalizar(txt) {
+    return (txt || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}_\s]/gu, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function calcularWer(referencia, hipotese) {
+    const ref = normalizar(referencia).split(' ').filter(Boolean);
+    const hip = normalizar(hipotese).split(' ').filter(Boolean);
+    const n = ref.length, m = hip.length;
+    if (n === 0) return null;
+
+    const Tipo = (n + m) > 65000 ? Uint32Array : Uint16Array;
+    const d = Array.from({ length: n + 1 }, () => new Tipo(m + 1));
+    for (let i = 0; i <= n; i++) d[i][0] = i;
+    for (let j = 0; j <= m; j++) d[0][j] = j;
+
+    for (let i = 1; i <= n; i++) {
+        for (let j = 1; j <= m; j++) {
+            const custo = ref[i - 1] === hip[j - 1] ? 0 : 1;
+            d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + custo);
+        }
+    }
+
+    let i = n, j = m, S = 0, D = 0, I = 0;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && d[i][j] === d[i - 1][j - 1] + (ref[i - 1] === hip[j - 1] ? 0 : 1)) {
+            if (ref[i - 1] !== hip[j - 1]) S++;
+            i--; j--;
+        } else if (i > 0 && d[i][j] === d[i - 1][j] + 1) {
+            D++; i--;
+        } else {
+            I++; j--;
+        }
+    }
+    return { wer: +(((S + D + I) / n) * 100).toFixed(2), s: S, d: D, i: I, n };
+}
+
+function calcularCer(referencia, hipotese) {
+    const ref = Array.from(normalizar(referencia));
+    const hip = Array.from(normalizar(hipotese));
+    if (ref.length === 0) return null;
+
+    let anterior = Array.from({ length: hip.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= ref.length; i++) {
+        const atual = [i];
+        for (let j = 1; j <= hip.length; j++) {
+            const custo = ref[i - 1] === hip[j - 1] ? 0 : 1;
+            atual[j] = Math.min(anterior[j] + 1, atual[j - 1] + 1, anterior[j - 1] + custo);
+        }
+        anterior = atual;
+    }
+    return +((anterior[hip.length] / ref.length) * 100).toFixed(2);
+}
+
+function corMetrica(v) {
+    if (v == null) return 'text-gray-400';
+    if (v < 7) return 'text-emerald-400';
+    if (v < 12) return 'text-amber-300';
+    return 'text-red-400';
+}
+
+/* ── sincronização / carga ──────────────────────────────────────────────── */
+function lerPendentes() {
+    try { return JSON.parse(localStorage.getItem(CHAVE_PENDENTES) || '[]'); }
+    catch { return []; }
+}
+function gravarPendentes(lista) {
+    localStorage.setItem(CHAVE_PENDENTES, JSON.stringify(lista));
+}
+
+async function sincronizarPendentes(token) {
+    const pendentes = lerPendentes();
+    if (!pendentes.length) return;
+    const restantes = [];
+    for (const p of pendentes) {
+        try {
+            const r = await fetch(`${API}/transcricoes`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify(p),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!(r.ok && d.sucesso)) restantes.push(p);
+        } catch { restantes.push(p); }
+    }
+    gravarPendentes(restantes);
+    if (restantes.length < pendentes.length) toast('Transcrições locais sincronizadas com a sua conta.');
+}
+
+async function carregar() {
+    const token = localStorage.getItem('token');
+    if (!token) { window.location.href = '../cadastro/login.html'; return; }
+
+    await sincronizarPendentes(token);
+
+    let itens = [];
+    try {
+        const r = await fetch(`${API}/transcricoes`, { headers: { 'Authorization': `Bearer ${token}` } });
+        if (r.status === 401 || r.status === 403) {
+            localStorage.removeItem('token');
+            window.location.href = '../cadastro/login.html';
+            return;
+        }
+        const d = await r.json();
+        if (!r.ok || !d.sucesso) throw new Error(d.erro || 'Erro ao carregar.');
+        itens = d.transcricoes;
+    } catch (e) {
+        console.error(e);
+        toast('Servidor indisponível: mostrando apenas o que está neste navegador.', 'error');
+    }
+
+    // Pendentes locais entram no topo (são as mais recentes), na ordem da pilha
+    const locais = lerPendentes()
+        .map(p => ({ ...p, id: 'local-' + p.client_id, local: true }))
+        .reverse();
+
+    renderizarLista([...locais, ...itens]);
+}
+
+/* ── renderização ───────────────────────────────────────────────────────── */
+function renderizarLista(itens) {
+    const lista = document.getElementById('lista');
+    lista.innerHTML = '';
+    document.getElementById('resumo').textContent =
+        itens.length ? `${itens.length} transcrição(ões) empilhada(s)` : '';
+
+    if (!itens.length) {
+        lista.appendChild(el('div', 'text-center text-gray-400 text-sm py-10 bg-[#121827]/80 border border-white/10 rounded-3xl',
+            'Nenhuma transcrição salva ainda. Volte ao Ground Truth e transcreva um áudio.'));
+        return;
+    }
+    itens.forEach((item, idx) => lista.appendChild(criarCartao(item, itens.length - idx)));
+}
+
+function criarCartao(item, numero) {
+    const card = el('article', 'bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 relative overflow-hidden');
+    card.appendChild(el('div', 'absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-emerald-400 to-indigo-500'));
+
+    /* cabeçalho */
+    const topo = el('div', 'flex flex-wrap items-start justify-between gap-3');
+    const titulos = el('div', 'space-y-1 min-w-0');
+    titulos.appendChild(el('h2', 'text-lg font-extrabold text-white break-words', `#${numero} · ${item.titulo || 'Sem título'}`));
+    const dataTxt = item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '';
+    const meta = [dataTxt, item.origem === 'microfone' ? '🎤 microfone' : '📁 arquivo'];
+    if (item.metadados && item.metadados.duracao_audio_s != null) meta.push(`${formatarTempo(item.metadados.duracao_audio_s)} de áudio`);
+    titulos.appendChild(el('p', 'text-xs text-gray-400', meta.filter(Boolean).join(' · ')));
+    topo.appendChild(titulos);
+    if (item.local) topo.appendChild(el('span', 'bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold px-2.5 py-1 rounded-full', 'não sincronizado'));
+    card.appendChild(topo);
+
+    /* texto */
+    const detalhes = el('details', 'bg-black/20 border border-white/5 rounded-xl');
+    detalhes.appendChild(el('summary', 'cursor-pointer text-xs font-semibold text-indigo-300 px-4 py-3', 'Ver transcrição completa'));
+    detalhes.appendChild(el('div', 'texto-transcricao text-gray-300 text-sm leading-relaxed px-4 pb-4 max-h-[50vh] overflow-y-auto', item.texto || item.hipotese || ''));
+    card.appendChild(detalhes);
+
+    /* métricas WER / CER */
+    const blocoMetricas = el('div', 'space-y-3');
+    card.appendChild(blocoMetricas);
+
+    const grade = el('div', 'grid grid-cols-2 sm:grid-cols-5 gap-3');
+    blocoMetricas.appendChild(grade);
+
+    function desenharMetricas(m) {
+        grade.innerHTML = '';
+        const celulas = [
+            ['WER', m && m.wer != null ? m.wer + '%' : '—', corMetrica(m && m.wer)],
+            ['CER', m && m.cer != null ? m.cer + '%' : '—', corMetrica(m && m.cer)],
+            ['Substituições', m && m.s != null ? m.s : '—', 'text-white'],
+            ['Deleções', m && m.d != null ? m.d : '—', 'text-white'],
+            ['Inserções', m && m.i != null ? m.i : '—', 'text-white'],
+        ];
+        celulas.forEach(([rotulo, valor, cor]) => {
+            const c = el('div', 'bg-white/5 border border-white/5 rounded-xl p-3 text-center');
+            c.appendChild(el('div', 'text-[10px] uppercase tracking-wider text-gray-400 font-semibold', rotulo));
+            c.appendChild(el('div', `text-xl font-extrabold mt-1 ${cor}`, valor));
+            grade.appendChild(c);
+        });
+    }
+    desenharMetricas(item.metricas);
+
+    const refArea = el('textarea', 'w-full px-4 py-3 bg-[#0b0f19]/60 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm resize-y');
+    refArea.rows = 4;
+    refArea.placeholder = 'Cole aqui a transcrição de referência (ground truth) para calcular WER e CER...';
+    refArea.value = item.referencia || '';
+    blocoMetricas.appendChild(refArea);
+
+    const botao = el('button', 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-bold px-5 py-2.5 rounded-xl text-xs transition', 'Calcular WER / CER');
+    botao.type = 'button';
+    blocoMetricas.appendChild(botao);
+
+    botao.onclick = async () => {
+        const referencia = refArea.value.trim();
+        if (!referencia) { toast('Cole o texto de referência.', 'error'); return; }
+        const w = calcularWer(referencia, item.hipotese || item.texto || '');
+        const c = calcularCer(referencia, item.hipotese || item.texto || '');
+        if (!w || c == null) { toast('Referência vazia após normalização.', 'error'); return; }
+
+        const metricas = { wer: w.wer, cer: c, s: w.s, d: w.d, i: w.i, n: w.n };
+        item.metricas = metricas;
+        item.referencia = referencia;
+        desenharMetricas(metricas);
+
+        if (item.local) {
+            const pend = lerPendentes().map(p => p.client_id === item.client_id ? { ...p, referencia, metricas } : p);
+            gravarPendentes(pend);
+            toast('Métricas calculadas (guardadas neste navegador).');
+            return;
+        }
+        try {
+            const r = await fetch(`${API}/transcricoes/${item.id}/referencia`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                body: JSON.stringify({ referencia, metricas }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok || !d.sucesso) throw new Error(d.erro || 'Falha ao salvar.');
+            toast('WER/CER calculados e salvos na sua conta.');
+        } catch (e) {
+            toast('Calculado, mas não consegui salvar: ' + e.message, 'error');
+        }
+    };
+
+    /* palavras de fronteira (dúvida) */
+    const fronteira = item.palavras_fronteira || [];
+    const blocoF = el('div', 'space-y-3 pt-2 border-t border-white/5');
+    blocoF.appendChild(el('h3', 'text-sm font-bold text-white',
+        `Palavras na fronteira (dúvida) · ${fronteira.length}`));
+    blocoF.appendChild(el('p', 'text-[11px] text-gray-500',
+        'Palavras coladas numa troca de falante ou que foram movidas de um falante para outro pelos reparos de fronteira.'));
+
+    if (!fronteira.length) {
+        blocoF.appendChild(el('p', 'text-xs text-gray-400', 'Nenhuma palavra em dúvida nesta transcrição.'));
+    } else {
+        const chips = el('div', 'flex flex-wrap gap-2 max-h-64 overflow-y-auto pr-1');
+        fronteira.forEach(p => {
+            const chip = el('div', 'bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-xs');
+            chip.appendChild(el('span', 'font-bold text-amber-200', p.palavra));
+            chip.appendChild(el('span', 'text-gray-400', ` · ${formatarTempo(p.inicio)}`));
+            const detalheTxt = [p.motivo];
+            if (p.de && p.para && p.de !== p.para) detalheTxt.push(`${p.de} → ${p.para}`);
+            chip.appendChild(el('div', 'text-[10px] text-gray-400 mt-0.5', detalheTxt.filter(Boolean).join(' · ')));
+            chips.appendChild(chip);
+        });
+        blocoF.appendChild(chips);
+    }
+    card.appendChild(blocoF);
+
+    return card;
+}
+
+document.addEventListener('DOMContentLoaded', carregar);
+</script>
+</body>
+</html>

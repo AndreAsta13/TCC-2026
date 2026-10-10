@@ -9,7 +9,10 @@ const multer = require("multer");
 
 const app = express();
 
-app.use(express.json());
+// O limite padrão do express.json() é 100kb. Uma transcrição de 40 min (texto +
+// segmentos + palavras de fronteira) passa disso fácil e o POST /transcricoes
+// falharia com 413 antes de chegar na rota. Por isso o limite global é 25mb.
+app.use(express.json({ limit: "25mb" }));
 app.use(cors());
 
 const pool = new Pool({
@@ -18,9 +21,14 @@ const pool = new Pool({
 
 const JWT_SECRET = process.env.JWT_SECRET || "chave_secreta_padrao";
 
+// Mesmo limite do Flask (500 MB) e do front (TAMANHO_MAXIMO_MB em ground.js).
+// ATENÇÃO: o arquivo é guardado como BYTEA no Neon e fica inteiro na memória
+// durante o upload; arquivos muito grandes consomem RAM e o espaço do plano.
+const TAMANHO_MAXIMO_MB = 500;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 }
+  limits: { fileSize: TAMANHO_MAXIMO_MB * 1024 * 1024 }
 });
 
 function autenticarToken(req, res, next) {
@@ -41,6 +49,9 @@ function autenticarToken(req, res, next) {
   });
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   TABELAS
+   ══════════════════════════════════════════════════════════════════════════ */
 async function prepararTabelaUploads() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS uploads_usuario (
@@ -64,6 +75,44 @@ prepararTabelaUploads().catch(err => {
   console.error("ERRO AO PREPARAR UPLOADS:", err);
 });
 
+async function prepararTabelaTranscricoes() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS transcricoes (
+      id                 BIGSERIAL PRIMARY KEY,
+      usuario_id         TEXT        NOT NULL,
+      client_id          TEXT        NOT NULL,
+      origem             TEXT        NOT NULL DEFAULT 'arquivo',
+      titulo             TEXT,
+      nome_arquivo       TEXT,
+      texto              TEXT        NOT NULL DEFAULT '',
+      hipotese           TEXT        NOT NULL DEFAULT '',
+      segmentos          JSONB       NOT NULL DEFAULT '[]'::jsonb,
+      palavras_fronteira JSONB       NOT NULL DEFAULT '[]'::jsonb,
+      metadados          JSONB       NOT NULL DEFAULT '{}'::jsonb,
+      referencia         TEXT,
+      metricas           JSONB,
+      criado_em          TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS transcricoes_usuario_client_idx
+    ON transcricoes (usuario_id, client_id)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS transcricoes_usuario_criado_idx
+    ON transcricoes (usuario_id, criado_em DESC, id DESC)
+  `);
+}
+
+prepararTabelaTranscricoes().catch(err => {
+  console.error("ERRO AO PREPARAR TRANSCRIÇÕES:", err);
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TESTE / CADASTRO / LOGIN / PERFIL
+   ══════════════════════════════════════════════════════════════════════════ */
 app.get("/teste-db", async (req, res) => {
   try {
     const resultado = await pool.query("SELECT NOW()");
@@ -140,6 +189,32 @@ app.post("/login", async (req, res) => {
   }
 });
 
+app.get("/me", autenticarToken, async (req, res) => {
+  const usuarioId = req.usuario.userId;
+
+  try {
+    const resultado = await pool.query(
+      "SELECT id, nome, email FROM usuarios WHERE id = $1",
+      [usuarioId]
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({ erro: "Usuário não encontrado" });
+    }
+
+    res.json({
+      sucesso: true,
+      usuario: resultado.rows[0]
+    });
+  } catch (err) {
+    console.error("ERRO AO BUSCAR USUÁRIO:", err);
+    res.status(500).json({ erro: "Erro interno do servidor" });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ARQUIVOS (upload do áudio/vídeo na conta do usuário)
+   ══════════════════════════════════════════════════════════════════════════ */
 app.post(
   "/arquivos/upload",
   autenticarToken,
@@ -235,6 +310,9 @@ app.get("/arquivos/:id", autenticarToken, async (req, res) => {
   }
 });
 
+/* ══════════════════════════════════════════════════════════════════════════
+   METADADOS
+   ══════════════════════════════════════════════════════════════════════════ */
 app.post("/metadados", autenticarToken, async (req, res) => {
   const { titulo, descricao } = req.body;
   const usuarioId = req.usuario.userId;
@@ -284,29 +362,102 @@ app.get("/metadados", autenticarToken, async (req, res) => {
   }
 });
 
-app.get("/me", autenticarToken, async (req, res) => {
-  const usuarioId = req.usuario.userId;
+/* ══════════════════════════════════════════════════════════════════════════
+   HISTÓRICO DE TRANSCRIÇÕES (antes ficava em transcricoes.js)
+   ══════════════════════════════════════════════════════════════════════════ */
 
+// LISTAR — pilha LIFO: a mais recente primeiro
+app.get("/transcricoes", autenticarToken, async (req, res) => {
   try {
-    const resultado = await pool.query(
-      "SELECT id, nome, email FROM usuarios WHERE id = $1",
-      [usuarioId]
+    const { rows } = await pool.query(
+      `SELECT id, client_id, origem, titulo, nome_arquivo, texto, hipotese,
+              segmentos, palavras_fronteira, metadados, referencia, metricas, criado_em
+         FROM transcricoes
+        WHERE usuario_id = $1
+        ORDER BY criado_em DESC, id DESC`,
+      [String(req.usuario.userId)]
     );
 
-    if (resultado.rows.length === 0) {
-      return res.status(404).json({ erro: "Usuário não encontrado" });
-    }
-
-    res.json({
-      sucesso: true,
-      usuario: resultado.rows[0]
-    });
+    res.json({ sucesso: true, transcricoes: rows });
   } catch (err) {
-    console.error("ERRO AO BUSCAR USUÁRIO:", err);
-    res.status(500).json({ erro: "Erro interno do servidor" });
+    console.error("ERRO AO LISTAR TRANSCRIÇÕES:", err);
+    res.status(500).json({ sucesso: false, erro: "Erro ao listar transcrições." });
   }
 });
 
+// EMPILHAR — sempre insere uma NOVA linha (nunca substitui)
+app.post("/transcricoes", autenticarToken, async (req, res) => {
+  const b = req.body || {};
+
+  if (!b.client_id || (!b.texto && !b.hipotese)) {
+    return res.status(400).json({ sucesso: false, erro: "client_id e texto são obrigatórios." });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO transcricoes
+         (usuario_id, client_id, origem, titulo, nome_arquivo, texto, hipotese,
+          segmentos, palavras_fronteira, metadados)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb)
+       ON CONFLICT (usuario_id, client_id) DO NOTHING
+       RETURNING id, client_id, criado_em`,
+      [
+        String(req.usuario.userId),
+        String(b.client_id),
+        b.origem || "arquivo",
+        b.titulo || null,
+        b.nome_arquivo || null,
+        b.texto || "",
+        b.hipotese || "",
+        JSON.stringify(b.segmentos || []),
+        JSON.stringify(b.palavras_fronteira || []),
+        JSON.stringify(b.metadados || {})
+      ]
+    );
+
+    // rows vazio = já existia (reenvio de pendente): continua sendo sucesso
+    res.status(201).json({ sucesso: true, transcricao: rows[0] || null });
+  } catch (err) {
+    console.error("ERRO AO SALVAR TRANSCRIÇÃO:", err);
+    res.status(500).json({ sucesso: false, erro: "Erro ao salvar transcrição." });
+  }
+});
+
+// Guarda o texto de referência (ground truth) e as métricas WER/CER calculadas
+app.patch("/transcricoes/:id/referencia", autenticarToken, async (req, res) => {
+  const { referencia, metricas } = req.body || {};
+
+  if (!referencia || !metricas) {
+    return res.status(400).json({ sucesso: false, erro: "Envie referencia e metricas." });
+  }
+
+  // id é BIGSERIAL: um valor não numérico faria o Postgres lançar erro (500)
+  if (!/^\d+$/.test(req.params.id)) {
+    return res.status(400).json({ sucesso: false, erro: "ID inválido." });
+  }
+
+  try {
+    const { rowCount } = await pool.query(
+      `UPDATE transcricoes
+          SET referencia = $1, metricas = $2::jsonb
+        WHERE id = $3 AND usuario_id = $4`,
+      [referencia, JSON.stringify(metricas), req.params.id, String(req.usuario.userId)]
+    );
+
+    if (!rowCount) {
+      return res.status(404).json({ sucesso: false, erro: "Transcrição não encontrada." });
+    }
+
+    res.json({ sucesso: true });
+  } catch (err) {
+    console.error("ERRO AO SALVAR MÉTRICAS:", err);
+    res.status(500).json({ sucesso: false, erro: "Erro ao salvar métricas." });
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   GROUND TRUTH (resumo/lista)
+   ══════════════════════════════════════════════════════════════════════════ */
 app.get("/gt/listar", autenticarToken, async (req, res) => {
   const usuarioId = req.usuario.userId;
 
@@ -341,11 +492,24 @@ app.get("/gt/resumo", autenticarToken, async (req, res) => {
   }
 });
 
+/* ══════════════════════════════════════════════════════════════════════════
+   TRATAMENTO DE ERROS — SEMPRE depois de todas as rotas
+   ══════════════════════════════════════════════════════════════════════════ */
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
     return res.status(400).json({
-      erro: "Arquivo muito grande. Limite máximo: 100MB."
+      erro: `Arquivo muito grande. Limite máximo: ${TAMANHO_MAXIMO_MB}MB.`
     });
+  }
+
+  // JSON maior que o limite do express.json
+  if (err && err.type === "entity.too.large") {
+    return res.status(413).json({ erro: "Conteúdo muito grande para ser salvo." });
+  }
+
+  // JSON malformado
+  if (err && err.type === "entity.parse.failed") {
+    return res.status(400).json({ erro: "JSON inválido." });
   }
 
   if (err) {

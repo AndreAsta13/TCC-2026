@@ -22,6 +22,13 @@
             color: #ffffff;
             border-color: rgba(99, 102, 241, 0.5);
         }
+
+        /* Barra de rolagem da caixa de transcrição (tema escuro) */
+        #transcript::-webkit-scrollbar { width: 8px; }
+        #transcript::-webkit-scrollbar-track { background: transparent; }
+        #transcript::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.4); border-radius: 9999px; }
+        #transcript::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.6); }
+        #transcript { scrollbar-width: thin; scrollbar-color: rgba(99, 102, 241, 0.4) transparent; }
     </style>
 
     <script>
@@ -159,6 +166,7 @@
                 <div class="hidden absolute right-0 mt-2 w-48 bg-[#121827] border border-white/10 rounded-2xl shadow-2xl py-2 z-50 backdrop-blur-xl" id="menuPanel">
                     <a href="../index.html" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">🏠 Início</a>
                     <a href="ground_truth.html" class="block px-4 py-2 text-sm text-indigo-400 font-semibold hover:bg-white/5 transition">📋 Ground Truth</a>
+                    <a href="historico.html" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">🗂 Histórico</a>
                     <a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">📊 Meus arquivos</a>
                     <a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">⚙️ Configurações</a>
                 </div>
@@ -213,7 +221,7 @@
                 </div>
                 <div class="bg-white/5 border border-white/5 rounded-2xl p-5">
                     <h4 class="font-bold text-white text-base mb-1">3. Receba o texto</h4>
-                    <p class="text-gray-400 text-xs">Transcrição clara para aulas e reuniões.</p>
+                    <p class="text-gray-400 text-xs">Transcrição clara para aulas e reuniões. Poderá ler o texto completo dentro do DataSet</p>
                 </div>
             </div>
 
@@ -224,11 +232,13 @@
                     <span id="status" class="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-xs font-semibold px-3 py-1 rounded-full">Aguardando</span>
                 </div>
 
-                <div id="transcript" class="min-h-[140px] text-gray-300 text-sm leading-relaxed whitespace-pre-wrap bg-black/20 p-4 rounded-xl border border-white/5">
+                <!-- Caixa com altura máxima e rolagem interna (suporta transcrições de 40+ min) -->
+                <div id="transcript" class="min-h-[140px] max-h-[70vh] overflow-y-auto resize-y text-gray-300 text-sm leading-relaxed whitespace-pre-wrap bg-black/20 p-4 rounded-xl border border-white/5">
                     O texto transcrito aparecerá aqui...
                 </div>
 
-                <div class="flex justify-end pt-2">
+                <div class="flex justify-end gap-3 pt-2">
+                    <a href="historico.html" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition">Ver histórico</a>
                     <button id="downloadBtn" class="bg-white/10 hover:bg-white/20 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition">
                         Baixar transcrição
                     </button>
@@ -359,7 +369,7 @@
                             <div class="border-2 border-dashed border-white/20 hover:border-indigo-500/50 bg-white/5 rounded-2xl p-8 text-center cursor-pointer transition" id="dropZone" onclick="document.getElementById('audioInput').click()">
                                 <div class="text-4xl mb-3">🎵</div>
                                 <div id="dropText" class="text-sm font-semibold text-white">Clique ou arraste o arquivo aqui</div>
-                                <div class="text-xs text-gray-400 mt-2">MP3, WAV, M4A, WebM — máx. 100 MB</div>
+                                <div class="text-xs text-gray-400 mt-2">MP3, WAV, M4A, WebM — máx. 500 MB</div>
                             </div>
                             
                             <input type="file" id="audioInput" accept="audio/*,video/*" class="hidden" onchange="arquivoEscolhido(this)">
@@ -464,15 +474,6 @@ GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/credenciais.json</pre>
         </section>
 
     </main>
-
-    <!-- NAVEGAÇÃO SECUNDÁRIA / SLIDES -->
-    <nav class="hidden" id="slideNav">
-        <button class="slide-dot active" data-slide="0" aria-label="Início"></button>
-        <button class="slide-dot" data-slide="1" aria-label="Dataset"></button>
-        <button class="slide-dot" data-slide="2" aria-label="Análises"></button>
-    </nav>
-    <button class="hidden" id="slidePrev" aria-label="Seção anterior">‹</button>
-    <button class="hidden" id="slideNext" aria-label="Próxima seção">›</button>
 
     <!-- FOOTER -->
     <footer class="border-t border-white/10 py-6 bg-[#080b12]/50 text-center text-gray-500 text-xs mt-12">
