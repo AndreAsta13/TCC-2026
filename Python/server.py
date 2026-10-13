@@ -2872,7 +2872,8 @@ def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
 
     try:
         print(f"[2/10] Verificando duração do arquivo recebido...")
-        duracao_bruta = librosa.get_duration(path=tmp_path)
+        probe_duracao = ffmpeg.probe(tmp_path)
+        duracao_bruta = float(probe_duracao["format"]["duration"])
         print(f"[2/10] Duração: {int(duracao_bruta)}s")
 
         if duracao_bruta > LIMITE_SEGUNDOS:
