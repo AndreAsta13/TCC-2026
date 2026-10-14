@@ -166,7 +166,7 @@
                 <div class="hidden absolute right-0 mt-2 w-48 bg-[#121827] border border-white/10 rounded-2xl shadow-2xl py-2 z-50 backdrop-blur-xl" id="menuPanel">
                     <a href="../index.html" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">🏠 Início</a>
                     <a href="ground_truth.html" class="block px-4 py-2 text-sm text-indigo-400 font-semibold hover:bg-white/5 transition">📋 Ground Truth</a>
-                    <a href="historico.html" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">🗂 Histórico</a>
+                    <a href="Historico.html" target="_blank" rel="noopener" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">🗂 Histórico</a>
                     <a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">📊 Meus arquivos</a>
                     <a href="#" class="block px-4 py-2 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">⚙️ Configurações</a>
                 </div>
@@ -228,7 +228,7 @@
             <!-- CARD TRANSCRIÇÃO EM TEMPO REAL -->
             <div class="bg-[#0b0f19]/80 border border-white/10 rounded-2xl p-6 space-y-4">
                 <div class="flex items-center justify-between border-b border-white/5 pb-4">
-                    <h3 class="font-bold text-white text-lg">Transcrição em tempo real</h3>
+                    <h3 class="font-bold text-whitehisto text-lg">Transcrição em tempo real</h3>
                     <span id="status" class="bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 text-xs font-semibold px-3 py-1 rounded-full">Aguardando</span>
                 </div>
 
@@ -238,7 +238,7 @@
                 </div>
 
                 <div class="flex justify-end gap-3 pt-2">
-                    <a href="historico.html" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition">Ver histórico</a>
+                    <a href="Historico.html" target="_blank" rel="noopener" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition">Ver histórico</a>
                     <button id="downloadBtn" class="bg-white/10 hover:bg-white/20 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition">
                         Baixar transcrição
                     </button>
@@ -288,190 +288,6 @@
             </div>
         </section>
 
-        <!-- SEÇÃO TABS & PAINEL -->
-        <section class="bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl" id="tabsSection">
-            <div class="p-6 border-b border-white/10 flex flex-wrap items-center justify-between gap-4 bg-white/[0.02]">
-                <div class="flex flex-wrap gap-2">
-                    <button class="tab active px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('dataset', this)">📋 Dataset</button>
-                    <button class="tab px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('wer', this)">📊 Análise WER</button>
-                    <button class="tab px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('adicionar', this)">➕ Adicionar áudio</button>
-                    <button class="tab px-4 py-2.5 rounded-xl text-xs font-semibold border border-white/10 text-gray-300 hover:text-white transition" onclick="showTab('storage', this)">☁️ Armazenamento</button>
-                </div>
-
-                <div class="flex items-center gap-3">
-                    <button class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold px-4 py-2 rounded-xl text-xs transition" onclick="carregarDados()">↻ Atualizar</button>
-                    <button class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-emerald-600/20" onclick="exportarDataset()">⬇ Exportar JSON</button>
-                </div>
-            </div>
-
-            <div class="p-6 sm:p-8">
-                <!-- TAB: DATASET -->
-                <div id="tab-dataset" class="tab-content active">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm text-gray-300 border-collapse">
-                            <thead>
-                                <tr class="border-b border-white/10 text-xs uppercase tracking-wider text-gray-400 bg-white/5">
-                                    <th class="p-4 rounded-l-xl">#</th>
-                                    <th class="p-4">Arquivo</th>
-                                    <th class="p-4">Fonte</th>
-                                    <th class="p-4">Palavras GT</th>
-                                    <th class="p-4">WER</th>
-                                    <th class="p-4">CER</th>
-                                    <th class="p-4">Storage</th>
-                                    <th class="p-4 rounded-r-xl">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="datasetBody" class="divide-y divide-white/5">
-                                <tr>
-                                    <td colspan="8" class="text-center text-gray-400 py-10">Carregando dataset...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- TAB: WER -->
-                <div id="tab-wer" class="tab-content space-y-6">
-                    <div class="bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 p-4 rounded-2xl text-center font-mono font-bold text-lg">
-                        WER = ( S + D + I ) / N × 100%
-                    </div>
-
-                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                            <div class="text-indigo-400 font-extrabold text-xl">S</div>
-                            <div class="text-xs text-gray-400 mt-1">Substituições</div>
-                        </div>
-                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                            <div class="text-indigo-400 font-extrabold text-xl">D</div>
-                            <div class="text-xs text-gray-400 mt-1">Deleções</div>
-                        </div>
-                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                            <div class="text-indigo-400 font-extrabold text-xl">I</div>
-                            <div class="text-xs text-gray-400 mt-1">Inserções</div>
-                        </div>
-                        <div class="bg-white/5 p-4 rounded-xl border border-white/5 text-center">
-                            <div class="text-indigo-400 font-extrabold text-xl">N</div>
-                            <div class="text-xs text-gray-400 mt-1">Palavras no GT</div>
-                        </div>
-                    </div>
-
-                    <div id="werChart" class="min-h-[200px] flex items-center justify-center text-gray-500 border border-white/5 rounded-2xl p-6 bg-black/20">
-                        <!-- Gráfico carregado via JS -->
-                    </div>
-                </div>
-
-                <!-- TAB: ADICIONAR ÁUDIO -->
-                <div id="tab-adicionar" class="tab-content">
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div class="space-y-4">
-                            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider">Arquivo de áudio</label>
-                            
-                            <div class="border-2 border-dashed border-white/20 hover:border-indigo-500/50 bg-white/5 rounded-2xl p-8 text-center cursor-pointer transition" id="dropZone" onclick="document.getElementById('audioInput').click()">
-                                <div class="text-4xl mb-3">🎵</div>
-                                <div id="dropText" class="text-sm font-semibold text-white">Clique ou arraste o arquivo aqui</div>
-                                <div class="text-xs text-gray-400 mt-2">MP3, WAV, M4A, WebM — máx. 500 MB</div>
-                            </div>
-                            
-                            <input type="file" id="audioInput" accept="audio/*,video/*" class="hidden" onchange="arquivoEscolhido(this)">
-
-                            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider pt-2">Fonte do áudio</label>
-                            <select class="w-full px-4 py-3.5 bg-[#0b0f19]/60 border border-white/10 rounded-xl text-white focus:outline-none focus:border-indigo-500 text-sm" id="fonteSelect">
-                                <option value="">Selecione a origem...</option>
-                                <option value="Common Voice">Mozilla Common Voice</option>
-                                <option value="LibriSpeech">LibriSpeech PT</option>
-                                <option value="Podcast Acadêmico">Podcast Acadêmico</option>
-                                <option value="YouTube">YouTube (domínio público)</option>
-                                <option value="Gravação própria">Gravação própria</option>
-                            </select>
-
-                            <div class="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs text-indigo-300">
-                                💡 <strong>Dica:</strong> Use áudios de domínio público para garantir conformidade legal no dataset acadêmico.
-                            </div>
-                        </div>
-
-                        <div class="space-y-4">
-                            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wider">Transcrição manual (Ground Truth)</label>
-                            <textarea id="gtTextarea" rows="6" 
-                                class="w-full px-4 py-3.5 bg-[#0b0f19]/60 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm resize-none"
-                                placeholder="Digite aqui a transcrição exata e completa do áudio, palavra por palavra. Esta será a referência para o cálculo do WER.&#10;&#10;Ex: Bom dia professores e alunos presentes aqui nesta aula inaugural do curso de inteligência artificial..."></textarea>
-                            
-                            <div class="text-xs text-gray-400 flex justify-end">
-                                <span id="wordCount" class="text-indigo-400 font-semibold mr-1">0 palavras</span> digitadas
-                            </div>
-
-                            <div class="flex gap-3 pt-2">
-                                <button class="bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-bold px-6 py-3 rounded-xl text-sm transition shadow-lg shadow-indigo-600/30" onclick="enviarParaServidor()">
-                                    ⬆ Adicionar ao dataset
-                                </button>
-                                <button class="bg-white/5 hover:bg-white/10 text-gray-300 font-semibold px-5 py-3 rounded-xl text-sm border border-white/10 transition" onclick="limparFormulario()">
-                                    Limpar
-                                </button>
-                            </div>
-
-                            <div id="uploadProgress" class="hidden space-y-2 pt-2">
-                                <div class="text-xs text-gray-400" id="progressText">Enviando...</div>
-                                <div class="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                                    <div id="progressBar" class="h-full bg-indigo-500 rounded-full transition-all duration-300 w-0"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- TAB: STORAGE -->
-                <div id="tab-storage" class="tab-content space-y-6">
-                    <p class="text-xs text-gray-400">
-                        Configure a variável <code class="bg-white/10 text-indigo-300 px-2 py-1 rounded font-mono">STORAGE_BACKEND</code> no arquivo <code class="bg-white/10 text-indigo-300 px-2 py-1 rounded font-mono">.env</code> para alternar entre os backends.
-                    </p>
-
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div class="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-3" id="card-local">
-                            <div class="text-3xl">💾</div>
-                            <div class="font-bold text-white text-base">Local (padrão)</div>
-                            <p class="text-xs text-gray-400 leading-relaxed">Armazena na pasta <code class="text-gray-300">ground_truth_dataset/</code> do servidor</p>
-                            <span class="inline-block bg-white/10 text-gray-300 text-[10px] font-mono px-2.5 py-1 rounded-md">STORAGE_BACKEND=local</span>
-                        </div>
-
-                        <div class="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-3" id="card-s3">
-                            <div class="text-3xl">🪣</div>
-                            <div class="font-bold text-white text-base">AWS S3</div>
-                            <p class="text-xs text-gray-400 leading-relaxed">Bucket S3 escalável. Configure as credenciais no <code class="text-gray-300">.env</code></p>
-                            <span class="inline-block bg-amber-500/20 text-amber-300 text-[10px] font-mono px-2.5 py-1 rounded-md">STORAGE_BACKEND=s3</span>
-                        </div>
-
-                        <div class="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-3" id="card-gcs">
-                            <div class="text-3xl">☁️</div>
-                            <div class="font-bold text-white text-base">Google Cloud Storage</div>
-                            <p class="text-xs text-gray-400 leading-relaxed">Bucket GCS com credenciais de conta de serviço JSON</p>
-                            <span class="inline-block bg-blue-500/20 text-blue-300 text-[10px] font-mono px-2.5 py-1 rounded-md">STORAGE_BACKEND=gcs</span>
-                        </div>
-                    </div>
-
-                    <div class="space-y-2 pt-4">
-                        <p class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Exemplo de .env</p>
-                        <pre class="bg-[#080b12] text-emerald-400 border border-white/10 rounded-2xl p-5 text-xs font-mono overflow-x-auto leading-relaxed">GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
-
-# ── escolha um: local | s3 | gcs ──
-STORAGE_BACKEND=s3
-
-# ── AWS S3 ──
-AWS_BUCKET_NAME=transcreva-ground-truth
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxx
-
-# ── Google Cloud Storage ──
-GCS_BUCKET_NAME=transcreva-ground-truth
-GOOGLE_APPLICATION_CREDENTIALS=/caminho/para/credenciais.json</pre>
-                    </div>
-
-                    <div class="space-y-2 pt-2">
-                        <p class="text-xs font-semibold text-gray-300 uppercase tracking-wider">Instalar dependências</p>
-                        <pre class="bg-[#080b12] text-emerald-400 border border-white/10 rounded-2xl p-5 text-xs font-mono overflow-x-auto">pip install flask flask-cors groq boto3 google-cloud-storage jiwer python-dotenv</pre>
-                    </div>
-                </div>
-            </div>
-        </section>
 
     </main>
 

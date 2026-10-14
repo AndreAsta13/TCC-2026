@@ -42,7 +42,8 @@ load_dotenv(ENV_PATH, override=True)
 FFMPEG_BIN = os.getenv("FFMPEG_BIN")
 
 if FFMPEG_BIN and os.path.isdir(FFMPEG_BIN):
-    os.add_dll_directory(FFMPEG_BIN)
+    if hasattr(os, "add_dll_directory"):  # só existe no Windows
+        os.add_dll_directory(FFMPEG_BIN)
     os.environ["PATH"] = FFMPEG_BIN + os.pathsep + os.environ["PATH"]
     print(f"FFmpeg Shared configurado: {FFMPEG_BIN}", flush=True)
 elif not FFMPEG_BIN:
@@ -2879,7 +2880,7 @@ def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
         if duracao_bruta > LIMITE_SEGUNDOS:
             raise ValueError(f"Áudio muito longo: {int(duracao_bruta)}s. Limite: {LIMITE_SEGUNDOS}s (1 hora).")
 
-        if extensao in ('.mp4', '.mp3', '.m4a', '.wav', '.webm', '.ogg', '.mkv', '.mov'):
+        if extensao in ('.mp4', '.mp3', '.m4a', '.webm', '.ogg', '.mkv', '.mov'):
             print(f"[3/10] Verificando canais de áudio...")
             info_canais = _detectar_canais(tmp_path)
             canais = info_canais["canais"]
@@ -3174,7 +3175,6 @@ def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
             for p in canais_normalizados_paths:
                 if p and os.path.exists(p):
                     os.remove(p)
-
 
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # limite de upload: 500 MB
 
