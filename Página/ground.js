@@ -15,6 +15,10 @@ const INTERVALO_POLLING_MS = 2000;
 // Tamanho máximo do arquivo enviado (deve ser <= MAX_CONTENT_LENGTH do Flask: 500 MB)
 const TAMANHO_MAXIMO_MB = 500;
 
+// Configurações usadas na comparação A x B (iguais às do avaliar_corpus.py)
+const CONFIG_A = { normalizar_loudness: 'true', pos_processamento: 'nenhum' };
+const CONFIG_B = { normalizar_loudness: 'true', pos_processamento: 'completo' };
+
 /* ══════════════════════════════════════════════════════════════════════════
    Variáveis globais que serão preenchidas quando o DOM estiver pronto
    (mantidas fora do DOMContentLoaded para que as funções abaixo, chamadas
@@ -332,9 +336,29 @@ function mostrarNoTranscript(texto) {
   }
 }
 
-async function iniciarJobTranscricao(arquivo) {
+/* Lê o painel "Configuração do experimento" (vazio = o Flask usa o padrão do .env) */
+function lerConfiguracao() {
+  const v = id => ((document.getElementById(id) || {}).value || '').trim();
+  return {
+    perfil: v('cfgPerfil'),
+    normalizar_loudness: v('cfgLoudness'),
+    pos_processamento: v('cfgPos'),
+    referencia: v('cfgReferencia'),
+  };
+}
+
+function rotuloDaConfig(cfg) {
+  if (cfg.normalizar_loudness === 'true' && cfg.pos_processamento === 'nenhum') return 'A';
+  if (cfg.normalizar_loudness === 'true' && cfg.pos_processamento === 'completo') return 'B';
+  return (cfg.normalizar_loudness || cfg.pos_processamento) ? 'personalizada' : 'padrão';
+}
+
+async function iniciarJobTranscricao(arquivo, cfg = {}) {
   const form = new FormData();
   form.append('file', arquivo);   // mesmo nome lido por request.files.get('file') no Flask
+  ['perfil', 'normalizar_loudness', 'pos_processamento', 'referencia'].forEach(k => {
+    if (cfg[k]) form.append(k, cfg[k]);
+  });
 
   let resp;
   try {
@@ -463,7 +487,7 @@ function novoClientId() {
     : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2);
 }
 
-function montarEntradaDoResultado(arquivo, resultado) {
+function montarEntradaDoResultado(arquivo, resultado, extras = {}) {
   const segmentos = (resultado && resultado.segmentos) || [];
 
   const hipotese = segmentos
@@ -484,10 +508,17 @@ function montarEntradaDoResultado(arquivo, resultado) {
     }))
   );
 
-  return {
+  // WER calculado pelo servidor (só existe se uma referência foi enviada)
+  const w = resultado.wer && resultado.wer.texto_corrigido;
+  const metricas = w ? {
+    wer: w.wer_percentual, cer: w.cer_percentual,
+    s: w.substituicoes, d: w.delecoes, i: w.insercoes, n: w.palavras_referencia,
+  } : undefined;
+
+  const entrada = {
     client_id: novoClientId(),
     origem: 'arquivo',
-    titulo: arquivo.name,
+    titulo: arquivo.name + (extras.rotulo_config ? ` [config ${extras.rotulo_config}]` : ''),
     nome_arquivo: arquivo.name,
     texto: ultimaTranscricao,
     hipotese,
@@ -504,8 +535,17 @@ function montarEntradaDoResultado(arquivo, resultado) {
       fator_tempo_real: resultado.fator_tempo_real ?? null,
       configuracao: resultado.configuracao || null,
       perfil: (resultado.perfil && resultado.perfil.perfil) || null,
+      rotulo_config: extras.rotulo_config || null,
+      grupo_comparacao: extras.grupo_comparacao || null,
+      wer: resultado.wer || null,
+      qualidade: resultado.qualidade || [],
     },
   };
+  if (metricas) {
+    entrada.metricas = metricas;
+    entrada.referencia = extras.referencia || null;
+  }
+  return entrada;
 }
 
 function montarEntradaDoMicrofone(texto) {
@@ -567,25 +607,52 @@ async function processarArquivo(arquivo) {
   emProcessamento = true;
   ultimaTranscricao = '';
 
+  const base = lerConfiguracao();
+  const comparar = !!(document.getElementById('cfgComparar') || {}).checked;
+  const grupo = comparar ? novoClientId() : null;
+  const execucoes = comparar
+    ? [['A', { ...base, ...CONFIG_A }], ['B', { ...base, ...CONFIG_B }]]
+    : [[rotuloDaConfig(base), base]];
+
   // Em paralelo: guarda o arquivo na conta enquanto a transcrição roda
   const salvando = SALVAR_ARQUIVO_NA_CONTA ? enviarArquivoNeon(arquivo) : Promise.resolve(true);
 
   try {
-    setStatus('Enviando...', 'processando');
-    mostrarNoTranscript(`Enviando "${arquivo.name}" para transcrição...`);
+    const resumo = [];
+    let algumaComFala = false;
 
-    const jobId = await iniciarJobTranscricao(arquivo);
-    const resultado = await aguardarJob(jobId);
+    for (let i = 0; i < execucoes.length; i++) {
+      const [rotulo, cfg] = execucoes[i];
+      const prefixo = execucoes.length > 1 ? `[${i + 1}/${execucoes.length}] Config ${rotulo}: ` : '';
 
-    renderizarResultado(resultado);
-    setStatus('Concluído', 'sucesso');
+      setStatus(prefixo + 'Enviando...', 'processando');
+      mostrarNoTranscript(`${prefixo}Enviando "${arquivo.name}" para transcrição...`);
 
-    // Empilha no histórico (Neon) — só se houve fala detectada
-    if (ultimaTranscricao) {
-      await salvarNoHistorico(montarEntradaDoResultado(arquivo, resultado));
-    } else {
-      toast('Transcrição concluída!', 'success');
+      const jobId = await iniciarJobTranscricao(arquivo, cfg);
+      const resultado = await aguardarJob(jobId);
+
+      renderizarResultado(resultado);
+
+      // Empilha no histórico (Neon) — só se houve fala detectada
+      if (ultimaTranscricao) {
+        algumaComFala = true;
+        await salvarNoHistorico(montarEntradaDoResultado(arquivo, resultado, {
+          rotulo_config: rotulo,
+          grupo_comparacao: grupo,
+          referencia: cfg.referencia,
+        }));
+      }
+
+      const w = resultado.wer && resultado.wer.texto_corrigido;
+      resumo.push(`Config ${rotulo}: WER ${w ? w.wer_percentual + '%' : 'n/d'} · ` +
+                  `${resultado.tempo_processamento_s ?? '?'} s · RTF ${resultado.fator_tempo_real ?? '?'}`);
     }
+
+    setStatus('Concluído', 'sucesso');
+    if (execucoes.length > 1 && transcriptEl) {
+      transcriptEl.textContent += '\n\n— Comparação A × B (detalhes no Histórico) —\n' + resumo.join('\n');
+    }
+    if (!algumaComFala) toast('Transcrição concluída!', 'success');
   } catch (err) {
     console.error('Erro na transcrição:', err);
     setStatus('Erro na transcrição', 'erro');

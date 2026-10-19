@@ -32,6 +32,28 @@ import concurrent.futures
 import uuid
 import math
 import time
+import csv
+import datetime
+
+# [AVALIAÇÃO] Blueprint das Tabelas 3/4/5 (arquivo avaliacao_tabelas.py ao lado deste).
+# Se o módulo não existir, o servidor sobe mesmo assim e usa a rota de fallback
+# definida mais abaixo (lê os CSV direto).
+try:
+    from avaliacao_tabelas import avaliacao_bp
+except ImportError as _e:
+    avaliacao_bp = None
+    print(f"AVISO: avaliacao_tabelas.py não encontrado ({_e}); usando a rota de fallback "
+          f"/avaliacao/tabelas.", flush=True)
+
+# [WER] jiwer é opcional: se não estiver instalado, o servidor sobe normalmente
+# e só o cálculo de WER/CER fica indisponível (pip install jiwer).
+try:
+    from jiwer import process_words as _jiwer_process_words, cer as _jiwer_cer
+    JIWER_DISPONIVEL = True
+except ImportError:
+    JIWER_DISPONIVEL = False
+    print("AVISO: 'jiwer' não instalado — o cálculo de WER/CER ficará indisponível. "
+          "Rode: pip install jiwer", flush=True)
 
 # --- Carrega o .env ANTES de qualquer uso de variável de ambiente (ex: FFMPEG_BIN) ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -64,6 +86,8 @@ print("Todos os imports concluídos. Iniciando servidor...\n", flush=True)
 
 app = Flask(__name__)
 CORS(app)
+if avaliacao_bp is not None:
+    app.register_blueprint(avaliacao_bp)
 
 # O SDK da Groq usa timeout padrão de só 60s por requisição — curto demais
 # mesmo para um único chunk de 10min (upload + processamento pode passar
@@ -151,8 +175,25 @@ POS_PROCESSAMENTO = _POS_PROCESSAMENTO_ENV
 # AUDD_API_TOKEN: token da API do AudD (https://audd.io). Sem token, a etapa é pulada.
 AUDD_API_TOKEN = os.getenv("AUDD_API_TOKEN", "").strip()
 # Liga/desliga o reconhecimento (padrão: ligado só no perfil música).
-_RECONHECER_ENV_TXT = os.getenv("RECONHECER_MUSICA")   # [PERFIL] None = decidir pelo perfil
-_RECONHECER_ENV = None if _RECONHECER_ENV_TXT is None else _RECONHECER_ENV_TXT.strip().lower() in ("1", "true", "sim", "yes")
+# [PERFIL] RECONHECER_MUSICA aceita três modos no .env:
+#   auto (ou vazio/ausente) -> decide pelo perfil: liga só no perfil música   [RECOMENDADO]
+#   true / 1 / sim / yes     -> SEMPRE reconhece (em qualquer perfil, inclusive conversa)
+#   false / 0 / nao / no     -> NUNCA reconhece
+# _RECONHECER_ENV: None = decidir pelo perfil | True = sempre | False = nunca
+def _ler_modo_reconhecer_musica(texto):
+    t = (texto or "").strip().lower()
+    if t in ("", "auto"):
+        return None
+    if t in ("1", "true", "sim", "yes", "on"):
+        return True
+    if t in ("0", "false", "nao", "não", "no", "off"):
+        return False
+    print(f"AVISO: RECONHECER_MUSICA='{texto}' inválido; usando 'auto' (decide pelo perfil).", flush=True)
+    return None
+
+
+_RECONHECER_ENV_TXT = os.getenv("RECONHECER_MUSICA")
+_RECONHECER_ENV = _ler_modo_reconhecer_musica(_RECONHECER_ENV_TXT)
 RECONHECER_MUSICA = EH_MUSICA if _RECONHECER_ENV is None else _RECONHECER_ENV
 # Busca a letra via API e usa como REFERÊNCIA para corrigir as palavras do ASR
 # (os timestamps continuam sendo os do Whisper).
@@ -160,6 +201,11 @@ USAR_LETRA_OFICIAL = os.getenv("USAR_LETRA_OFICIAL", "true").strip().lower() in 
 # Só aplica a letra se ela for parecida o bastante com o que o ASR ouviu
 # (protege contra identificação errada).
 LIMITE_SIMILARIDADE_LETRA = float(os.getenv("LIMITE_SIMILARIDADE_LETRA", "0.35"))
+# [LETRA] Quando a música é identificada, a letra oficial é aplicada às palavras do ASR
+# MESMO com POS_PROCESSAMENTO="nenhum". (Os experimentos A/B/C são feitos com conversas;
+# letra só existe para música, então ela não contamina essa comparação.)
+# Coloque "false" para voltar ao comportamento antigo (letra pulada em "nenhum").
+LETRA_IGNORA_POS_PROCESSAMENTO = os.getenv("LETRA_IGNORA_POS_PROCESSAMENTO", "true").strip().lower() in ("1", "true", "sim", "yes")
 
 _diarization_pipeline = None
 # Protege tanto o carregamento (lazy singleton) quanto as chamadas de
@@ -551,12 +597,18 @@ def _identificar_musica(caminho_arquivo, wav_path, duracao_total):
             os.remove(trecho)
 
 
-def _resumo_musica(info):
-    """Versão da info da música para devolver na API (sem o texto da letra)."""
+def _resumo_musica(info, relatorio_letra=None):
+    """
+    Info da música para devolver na API: título/artista/etc., o TEXTO da letra
+    oficial ("letra") e o relatório de como ela foi aplicada à transcrição
+    ("letra_aplicacao": aplicada?, similaridade ASR x letra, palavras ajustadas).
+    """
     if not info:
         return None
     resumo = {k: info.get(k) for k in ("titulo", "artista", "album", "lancamento", "link")}
     resumo["letra_encontrada"] = bool(info.get("letra"))
+    resumo["letra"] = info.get("letra")
+    resumo["letra_aplicacao"] = relatorio_letra
     return resumo
 
 
@@ -585,7 +637,8 @@ def _alinhar_palavras_com_letra(palavras, letra, limite=LIMITE_SIMILARIDADE_LETR
     """
     tokens_letra = _preparar_tokens_letra(letra or "")
     if not palavras or not tokens_letra:
-        return palavras
+        return palavras, {"aplicada": False, "motivo": "sem palavras ou sem letra",
+                          "similaridade": None, "palavras_ajustadas": 0}
 
     asr = [(_normalizar_texto_comparacao(p["word"]).replace(" ", "") or f"\u00a7{i}")
            for i, p in enumerate(palavras)]
@@ -596,7 +649,8 @@ def _alinhar_palavras_com_letra(palavras, letra, limite=LIMITE_SIMILARIDADE_LETR
     if similaridade < limite:
         print(f"    [LETRA] Similaridade {similaridade:.2f} < {limite:.2f}: letra ignorada "
               f"(identificação provavelmente errada).", flush=True)
-        return palavras
+        return palavras, {"aplicada": False, "motivo": "similaridade abaixo do limite",
+                          "similaridade": round(similaridade, 3), "palavras_ajustadas": 0}
 
     novas = list(palavras)
     ajustadas = 0
@@ -610,7 +664,8 @@ def _alinhar_palavras_com_letra(palavras, letra, limite=LIMITE_SIMILARIDADE_LETR
 
     print(f"    [LETRA] Similaridade ASR x letra: {similaridade:.2f} | "
           f"{ajustadas} palavra(s) ajustada(s) pela letra.", flush=True)
-    return novas
+    return novas, {"aplicada": True, "motivo": None,
+                   "similaridade": round(similaridade, 3), "palavras_ajustadas": ajustadas}
 
 
 # ---------------------------------------------------------------------------
@@ -2824,6 +2879,97 @@ def _corrigir_blocos(blocos):
 
 
 # ---------------------------------------------------------------------------
+# [WER] PRECISÃO DA TRANSCRIÇÃO: WER (Word Error Rate) e CER (Character Error Rate)
+# ---------------------------------------------------------------------------
+# WER = (S + D + I) / N, onde S = substituições, D = deleções, I = inserções e
+# N = nº de palavras da REFERÊNCIA (transcrição manual, "gabarito").
+# Quanto menor, melhor (0% = idêntico). Pode passar de 100% se houver muitas inserções.
+#
+# Normalização (a mesma do seu teste): minúsculas, pontuação removida, espaços
+# colapsados. Acentos são MANTIDOS ("está" != "esta"). Se quiser ignorar acentos,
+# passe ignorar_acentos=True em _normalizar_para_wer.
+def _normalizar_para_wer(texto, ignorar_acentos=False):
+    texto = (texto or "").lower()
+    if ignorar_acentos:
+        texto = unicodedata.normalize("NFD", texto)
+        texto = "".join(c for c in texto if unicodedata.category(c) != "Mn")
+    texto = re.sub(r"[^\w\s]", " ", texto)      # remove pontuação e símbolos
+    texto = re.sub(r"\s+", " ", texto).strip()  # colapsa espaços
+    return texto
+
+
+def _calcular_wer(referencia, hipotese, ignorar_acentos=False):
+    """
+    Compara `hipotese` (saída do sistema) com `referencia` (gabarito).
+    Devolve um dict com WER/CER em % e as contagens S/D/I, ou None se a
+    referência for vazia (WER indefinido). Levanta RuntimeError sem jiwer.
+    """
+    if not JIWER_DISPONIVEL:
+        raise RuntimeError("Biblioteca 'jiwer' não instalada. Rode: pip install jiwer")
+
+    ref_norm = _normalizar_para_wer(referencia, ignorar_acentos)
+    hip_norm = _normalizar_para_wer(hipotese, ignorar_acentos)
+
+    if not ref_norm:
+        return None
+
+    n_ref = len(ref_norm.split())
+    if not hip_norm:
+        # Hipótese vazia: tudo foi deletado (evita erro do jiwer com string vazia)
+        return {
+            "wer_percentual": 100.0,
+            "cer_percentual": 100.0,
+            "acertos": 0,
+            "substituicoes": 0,
+            "delecoes": n_ref,
+            "insercoes": 0,
+            "palavras_referencia": n_ref,
+            "palavras_hipotese": 0,
+        }
+
+    detalhes = _jiwer_process_words(ref_norm, hip_norm)
+    n_ref = detalhes.hits + detalhes.substitutions + detalhes.deletions
+    return {
+        "wer_percentual": round(detalhes.wer * 100, 2),
+        "cer_percentual": round(_jiwer_cer(ref_norm, hip_norm) * 100, 2),
+        "acertos": detalhes.hits,
+        "substituicoes": detalhes.substitutions,
+        "delecoes": detalhes.deletions,
+        "insercoes": detalhes.insertions,
+        "palavras_referencia": n_ref,
+        "palavras_hipotese": len(hip_norm.split()),
+    }
+
+
+def _avaliar_wer_resultado(segmentos, referencia, ignorar_acentos=False):
+    """
+    Calcula o WER sobre o resultado da transcrição, nas DUAS versões do texto:
+      - "texto_bruto"     : saída do ASR (campo "texto"), antes do pós-processamento
+      - "texto_corrigido" : depois do pós-processamento (campo "texto_corrigido")
+    Isso permite comparar as configurações A/B/C do experimento (loudness e
+    pós-processamento). Os blocos são concatenados em ordem cronológica; em
+    gravações com falas simultâneas (estéreo/multicanal) a ordem é por início.
+    """
+    ordenados = sorted(segmentos, key=lambda s: (s.get("inicio", 0), s.get("fim", 0)))
+    texto_bruto = " ".join((s.get("texto") or "") for s in ordenados)
+    texto_corrigido = " ".join((s.get("texto_corrigido") or s.get("texto") or "") for s in ordenados)
+
+    return {
+        "texto_bruto": _calcular_wer(referencia, texto_bruto, ignorar_acentos),
+        "texto_corrigido": _calcular_wer(referencia, texto_corrigido, ignorar_acentos),
+    }
+
+
+def _imprimir_wer(wer_resultado):
+    for nome, r in (wer_resultado or {}).items():
+        if not r:
+            continue
+        print(f"    [WER - {nome}] WER: {r['wer_percentual']:.2f}% | CER: {r['cer_percentual']:.2f}% | "
+              f"S={r['substituicoes']} D={r['delecoes']} I={r['insercoes']} "
+              f"N={r['palavras_referencia']}", flush=True)
+
+
+# ---------------------------------------------------------------------------
 # PIPELINE PRINCIPAL
 # ---------------------------------------------------------------------------
 def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
@@ -2920,6 +3066,11 @@ def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
                         f'{PROMPT_VOCABULARIO_TRANSCRICAO} Faixa: "{info_musica["titulo"]}", '
                         f'de {info_musica.get("artista") or "artista desconhecido"}.'
                     )
+
+            elif EH_MUSICA:
+                print(f"[4/10] Perfil música, mas o reconhecimento está DESLIGADO "
+                      f"(RECONHECER_MUSICA=false no .env): a letra oficial não será buscada. "
+                      f"Use RECONHECER_MUSICA=auto.", flush=True)
 
             # [NOVO] Isolamento de vocais (Demucs) — opcional, pesado
             if ISOLAR_VOCAIS_DEMUCS and EH_MUSICA:   # [PERFIL] Demucs só em música (conversa não vira mono)
@@ -3096,10 +3247,22 @@ def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
 
                 # [NOVO] Música identificada com letra: usa a letra como referência de texto
                 # [EXPERIMENTO] (pulado quando POS_PROCESSAMENTO="nenhum": altera as palavras do ASR)
-                if info_musica and info_musica.get("letra") and POS_PROCESSAMENTO != "nenhum":
-                    palavras_transcricao = _alinhar_palavras_com_letra(
-                        palavras_transcricao, info_musica["letra"]
-                    )
+                relatorio_letra = None
+                if info_musica and info_musica.get("letra"):
+                    if POS_PROCESSAMENTO != "nenhum" or LETRA_IGNORA_POS_PROCESSAMENTO:
+                        print(f"[8/10] Música identificada com letra oficial: aplicando a letra "
+                              f"às palavras transcritas...", flush=True)
+                        palavras_transcricao, relatorio_letra = _alinhar_palavras_com_letra(
+                            palavras_transcricao, info_musica["letra"]
+                        )
+                    else:
+                        print(f"[8/10] Letra encontrada, mas POS_PROCESSAMENTO='nenhum' e "
+                              f"LETRA_IGNORA_POS_PROCESSAMENTO=false: letra não aplicada.", flush=True)
+                        relatorio_letra = {"aplicada": False, "motivo": "pos_processamento=nenhum",
+                                           "similaridade": None, "palavras_ajustadas": 0}
+                elif info_musica:
+                    print(f"[8/10] Música identificada, mas sem letra disponível "
+                          f"(o AudD não retornou a letra): seguindo só com o ASR.", flush=True)
 
                 resultado = _combinar_diarizacao_transcricao(segmentos_falantes, palavras_transcricao)
 
@@ -3119,7 +3282,7 @@ def transcrever_arquivo(caminho_original, top_db=40, perfil=None,
                     "qualidade": [relatorio_qualidade_mono],
                     "perfil": decisao_perfil,
                     "informacoes_audio": informacoes_conversao,
-                    "musica": _resumo_musica(info_musica),
+                    "musica": _resumo_musica(info_musica, relatorio_letra),
                     **_metadados_execucao(duracao_bruta),
                 }
 
@@ -3222,7 +3385,8 @@ def _limpar_jobs_antigos():
             del JOBS[jid]
 
 
-def _executar_job(job_id, caminho, perfil=None, normalizar_loudness=None, pos_processamento=None):
+def _executar_job(job_id, caminho, perfil=None, normalizar_loudness=None, pos_processamento=None,
+                  referencia=None, ignorar_acentos_wer=False):
     """Roda em thread de background: processa o arquivo e grava o resultado no job."""
     with _fila_processamento:
         _atualizar_job(job_id, estado="processando")
@@ -3240,6 +3404,20 @@ def _executar_job(job_id, caminho, perfil=None, normalizar_loudness=None, pos_pr
             resultado["tempo_processamento_s"] = round(tempo_s, 2)
             # fator de tempo real = tempo de processamento / duração do áudio
             resultado["fator_tempo_real"] = round(tempo_s / duracao_s, 3) if duracao_s else None
+
+            # [WER] Se o cliente enviou a transcrição de referência, calcula a precisão.
+            # Fica FORA da medição de tempo acima e nunca derruba o job: falha vira aviso.
+            if referencia:
+                try:
+                    wer_resultado = _avaliar_wer_resultado(
+                        resultado.get("segmentos", []), referencia, ignorar_acentos_wer
+                    )
+                    resultado["wer"] = wer_resultado
+                    _imprimir_wer(wer_resultado)
+                except Exception as e:
+                    print(f"    [WER] Não foi possível calcular: {e}", flush=True)
+                    resultado["wer"] = {"erro": str(e)}
+
             _atualizar_job(job_id, estado="concluido", resultado=_sanitizar_json(resultado))
         except ValueError as e:
             # erros "esperados" (ex: áudio longo demais, sem trilha de áudio)
@@ -3272,6 +3450,9 @@ def transcrever():
       perfil               auto | conversa | musica
       normalizar_loudness  true | false          (padrão: NORMALIZAR_LOUDNESS do .env)
       pos_processamento    completo | nenhum | so_llm | so_regras   (padrão: POS_PROCESSAMENTO do .env)
+      referencia           texto da transcrição manual (gabarito) para calcular WER/CER
+      referencia_arquivo   (arquivo .txt, UTF-8) alternativa ao campo 'referencia'
+      wer_ignorar_acentos  true | false          (padrão: false)
     """
     arquivo = request.files.get('file')
     if arquivo is None or not arquivo.filename:
@@ -3297,6 +3478,23 @@ def transcrever():
     if pos_processamento not in (None,) + POS_PROCESSAMENTOS_VALIDOS:
         return jsonify({"erro": f"pos_processamento inválido. Use: {', '.join(POS_PROCESSAMENTOS_VALIDOS)}."}), 400
 
+    # [WER] Referência (gabarito): campo de texto OU arquivo .txt
+    referencia = (_param('referencia') or '').strip() or None
+    arquivo_ref = request.files.get('referencia_arquivo')
+    if referencia is None and arquivo_ref is not None and arquivo_ref.filename:
+        try:
+            referencia = arquivo_ref.read().decode('utf-8-sig').strip() or None
+        except UnicodeDecodeError:
+            return jsonify({"erro": "referencia_arquivo deve ser um .txt em UTF-8."}), 400
+
+    if referencia and not JIWER_DISPONIVEL:
+        return jsonify({"erro": "Cálculo de WER indisponível: instale a biblioteca com 'pip install jiwer'."}), 500
+
+    try:
+        ignorar_acentos_wer = bool(_ler_booleano_opcional(_param('wer_ignorar_acentos')))
+    except ValueError as e:
+        return jsonify({"erro": f"wer_ignorar_acentos: {e}. Use true ou false."}), 400
+
     _limpar_jobs_antigos()
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=extensao) as tmp:
@@ -3313,10 +3511,34 @@ def transcrever():
 
     threading.Thread(
         target=_executar_job,
-        args=(job_id, tmp_path, perfil_pedido, normalizar_loudness, pos_processamento),
+        args=(job_id, tmp_path, perfil_pedido, normalizar_loudness, pos_processamento,
+              referencia, ignorar_acentos_wer),
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id}), 202
+
+
+@app.route('/wer', methods=['POST'])
+def calcular_wer_rota():
+    """
+    [WER] Calcula WER/CER avulso entre dois textos, sem processar áudio.
+    Corpo JSON (ou form): {"referencia": "...", "hipotese": "...", "ignorar_acentos": false}
+    """
+    dados = request.get_json(silent=True) or request.form
+    referencia = (dados.get('referencia') or '').strip()
+    hipotese = (dados.get('hipotese') or '').strip()
+    if not referencia or not hipotese:
+        return jsonify({"erro": "Envie 'referencia' e 'hipotese' (ambos não vazios)."}), 400
+
+    try:
+        ignorar_acentos = bool(_ler_booleano_opcional(dados.get('ignorar_acentos')))
+        resultado = _calcular_wer(referencia, hipotese, ignorar_acentos)
+    except (ValueError, RuntimeError) as e:
+        return jsonify({"erro": str(e)}), 400
+
+    if resultado is None:
+        return jsonify({"erro": "A referência ficou vazia após a normalização."}), 400
+    return jsonify(_sanitizar_json(resultado))
 
 
 @app.route('/status/<job_id>', methods=['GET'])
@@ -3330,10 +3552,79 @@ def status_job(job_id):
     return jsonify(job)
 
 
+# ---------------------------------------------------------------------------
+# [AVALIAÇÃO] Fallback de /avaliacao/tabelas (Tabelas 3, 4 e 5 a partir dos CSV)
+# Só é registrada se NENHUMA rota /avaliacao/tabelas existir (ex.: o blueprint
+# avaliacao_tabelas não carregou ou não define essa URL).
+# ---------------------------------------------------------------------------
+PASTAS_AVALIACAO = [p for p in [
+    os.getenv("AVALIACAO_DIR", "").strip(),
+    os.path.dirname(os.path.abspath(__file__)),
+    BASE_DIR,
+    os.path.join(BASE_DIR, "avaliacao"),
+    os.path.join(BASE_DIR, "resultados"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "avaliacao"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultados"),
+] if p]
+
+TABELAS_AVALIACAO = {"tabela3": 3, "tabela4": 4, "tabela5": 5}
+
+
+def _achar_csv_tabela(numero):
+    padrao = re.compile(rf"tabela[\s_\-]*{numero}(?!\d)", re.IGNORECASE)
+    candidatos = []
+    for pasta in PASTAS_AVALIACAO:
+        if not os.path.isdir(pasta):
+            continue
+        for nome in os.listdir(pasta):
+            if nome.lower().endswith(".csv") and padrao.search(nome):
+                candidatos.append(os.path.join(pasta, nome))
+    return max(candidatos, key=os.path.getmtime) if candidatos else None
+
+
+def _ler_csv_tabela(caminho):
+    with open(caminho, "r", encoding="utf-8-sig", newline="") as f:
+        amostra = f.read(4096)
+        f.seek(0)
+        try:
+            dialeto = csv.Sniffer().sniff(amostra, delimiters=";,\t")
+        except csv.Error:
+            dialeto = csv.excel
+        linhas = [l for l in csv.reader(f, dialeto) if any(c.strip() for c in l)]
+    if not linhas:
+        return None
+    return {
+        "cabecalho": [c.strip() for c in linhas[0]],
+        "linhas": [[c.strip() for c in l] for l in linhas[1:]],
+        "atualizado_em": datetime.datetime.fromtimestamp(os.path.getmtime(caminho)).isoformat(),
+        "arquivo": os.path.basename(caminho),
+    }
+
+
+def avaliacao_tabelas_fallback():
+    resposta = {}
+    for chave, numero in TABELAS_AVALIACAO.items():
+        caminho = _achar_csv_tabela(numero)
+        try:
+            resposta[chave] = _ler_csv_tabela(caminho) if caminho else None
+        except Exception as e:
+            print(f"[AVALIAÇÃO] Falha ao ler {caminho}: {e}", flush=True)
+            resposta[chave] = None
+    return jsonify(resposta)
+
+
+if not any(r.rule == "/avaliacao/tabelas" for r in app.url_map.iter_rules()):
+    app.add_url_rule("/avaliacao/tabelas", "avaliacao_tabelas_fallback",
+                     avaliacao_tabelas_fallback, methods=["GET"])
+    print("[AVALIAÇÃO] Rota /avaliacao/tabelas registrada (fallback lendo CSV).", flush=True)
+
+
 if __name__ == '__main__':
     # Por padrão SOBE O SERVIDOR. Para rodar só o teste local:
     #   Windows (PowerShell):  $env:TESTE_LOCAL="1"; python app.py
     #   Windows (cmd):         set TESTE_LOCAL=1 && python app.py
+    # [WER] No teste local, para calcular o WER, defina REFERENCIA_TESTE_ARQUIVO no .env
+    # (caminho de um .txt com a transcrição manual do primeiro arquivo de teste).
     TESTE_LOCAL = os.getenv("TESTE_LOCAL", "0").strip().lower() in ("1", "true", "sim", "yes")
 
     if TESTE_LOCAL:
@@ -3351,6 +3642,16 @@ if __name__ == '__main__':
         else:
             print(f"[DIAGNÓSTICO] Conteúdo do diretório do script: {os.listdir(diretorio_script)}")
 
+        referencia_teste = None
+        caminho_ref = os.getenv("REFERENCIA_TESTE_ARQUIVO", "").strip()
+        if caminho_ref:
+            try:
+                with open(caminho_ref, "r", encoding="utf-8-sig") as f:
+                    referencia_teste = f.read().strip() or None
+                print(f"[DIAGNÓSTICO] Referência para WER carregada: {caminho_ref}")
+            except OSError as e:
+                print(f"[DIAGNÓSTICO] Não consegui ler REFERENCIA_TESTE_ARQUIVO ({e}).")
+
         resultados = {}
         for nome_arquivo in arquivos_teste:
             caminho = os.path.join(pasta_testes, nome_arquivo)
@@ -3359,6 +3660,13 @@ if __name__ == '__main__':
             print(f"{'=' * 70}")
             try:
                 resultados[nome_arquivo] = transcrever_arquivo(caminho)
+                if referencia_teste:
+                    try:
+                        wer_teste = _avaliar_wer_resultado(resultados[nome_arquivo]["segmentos"], referencia_teste)
+                        resultados[nome_arquivo]["wer"] = wer_teste
+                        _imprimir_wer(wer_teste)
+                    except Exception as e:
+                        print(f"  [WER] Não foi possível calcular: {e}")
             except Exception as e:
                 print(f"  ERRO ao processar {nome_arquivo}: {e}")
                 resultados[nome_arquivo] = None
@@ -3370,6 +3678,9 @@ if __name__ == '__main__':
             if resultado is not None:
                 total_alertas = sum(len(q.get('alertas', [])) for q in resultado.get('qualidade', []))
                 status = f"OK ({len(resultado['segmentos'])} blocos, {total_alertas} alerta(s) de qualidade)"
+                wer_info = (resultado.get("wer") or {}).get("texto_corrigido")
+                if wer_info:
+                    status += f" | WER: {wer_info['wer_percentual']:.2f}%"
             else:
                 status = "FALHOU"
             print(f"  {nome_arquivo}: {status}")

@@ -21,18 +21,14 @@
     <div id="toast" class="fixed top-5 right-5 z-50"></div>
 
     <header class="w-full border-b border-white/10 backdrop-blur-xl bg-[#0b0f19]/70 sticky top-0 z-40">
-        <div class="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
-            <a href="ground_truth.html" class="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-4 py-2 rounded-xl text-sm flex items-center gap-2 transition">
-                ← Voltar ao Ground Truth
-            </a>
+        <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
             <span class="text-xl font-extrabold tracking-tight text-white">
                 Transcreva<span class="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-emerald-400">.IA</span>
             </span>
         </div>
     </header>
 
-    <!-- Conteúdo centralizado -->
-    <main class="max-w-3xl mx-auto px-6 py-10 space-y-6">
+    <main class="max-w-5xl mx-auto px-6 py-10 space-y-6">
         <div class="text-center space-y-2">
             <h1 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Histórico de transcrições</h1>
             <p class="text-gray-400 text-sm">
@@ -40,6 +36,22 @@
             </p>
             <div id="resumo" class="text-xs text-indigo-300 font-semibold"></div>
         </div>
+
+        <!-- Comparação A x B montada a partir do próprio histórico -->
+        <details class="bg-[#121827]/80 border border-white/10 rounded-3xl p-6" id="painelComparacao">
+            <summary class="cursor-pointer font-bold text-white text-sm">Comparação A × B (do histórico)</summary>
+            <div id="conteudoComparacao" class="mt-4 space-y-3"></div>
+        </details>
+
+        <!-- Tabelas 3, 4 e 5 geradas pelos scripts de avaliação -->
+        <details class="bg-[#121827]/80 border border-white/10 rounded-3xl p-6" id="painelAvaliacao">
+            <summary class="cursor-pointer font-bold text-white text-sm">Avaliação do corpus (Tabelas 3, 4 e 5)</summary>
+            <div class="mt-4 space-y-6">
+                <button id="btnAtualizarAvaliacao" type="button"
+                    class="bg-white/10 hover:bg-white/20 text-white font-semibold px-4 py-2 rounded-xl text-xs transition">Atualizar tabelas</button>
+                <div id="conteudoAvaliacao" class="space-y-6"></div>
+            </div>
+        </details>
 
         <div id="lista" class="space-y-6">
             <div class="text-center text-gray-400 text-sm py-10">Carregando histórico...</div>
@@ -52,6 +64,7 @@
 
 <script>
 const API = 'http://localhost:3000';
+const API_TRANSCRICAO = 'http://localhost:5000';
 const CHAVE_PENDENTES = 'transcricoes_pendentes';
 let toastTimer = null;
 
@@ -80,6 +93,42 @@ function el(tag, classe, texto) {
     if (classe) e.className = classe;
     if (texto !== undefined && texto !== null) e.textContent = texto;
     return e;
+}
+
+/* metadados pode chegar como objeto (jsonb) ou como texto */
+function meta(item) {
+    let m = item && item.metadados;
+    if (typeof m === 'string') { try { m = JSON.parse(m); } catch { m = {}; } }
+    return m || {};
+}
+
+/* WER do item: o calculado manualmente aqui, ou o calculado pelo servidor */
+function werDe(item) {
+    if (item.metricas && item.metricas.wer != null) return item.metricas.wer;
+    const w = meta(item).wer && meta(item).wer.texto_corrigido;
+    return w ? w.wer_percentual : null;
+}
+
+/* tabela genérica (usada na comparação e nas Tabelas 3/4/5) */
+function tabela(cabecalho, linhas) {
+    const wrap = el('div', 'overflow-x-auto rounded-xl border border-white/10');
+    const t = el('table', 'min-w-full text-xs');
+    const thead = el('thead', 'bg-white/5');
+    const trh = el('tr');
+    cabecalho.forEach(c => trh.appendChild(el('th', 'px-3 py-2 text-left font-semibold text-gray-300 whitespace-nowrap', c)));
+    thead.appendChild(trh);
+    t.appendChild(thead);
+
+    const tbody = el('tbody');
+    linhas.forEach(l => {
+        const agregado = String(l[0]) === 'Agregado';
+        const tr = el('tr', 'border-t border-white/5 ' + (agregado ? 'bg-indigo-500/10 font-bold text-white' : 'text-gray-300'));
+        l.forEach(c => tr.appendChild(el('td', 'px-3 py-2 whitespace-nowrap', c === null || c === undefined || c === '' ? '—' : c)));
+        tbody.appendChild(tr);
+    });
+    t.appendChild(tbody);
+    wrap.appendChild(t);
+    return wrap;
 }
 
 /* ── WER / CER (mesma normalização do servidor: minúsculas, sem pontuação) ─ */
@@ -202,7 +251,96 @@ async function carregar() {
         .map(p => ({ ...p, id: 'local-' + p.client_id, local: true }))
         .reverse();
 
-    renderizarLista([...locais, ...itens]);
+    const todos = [...locais, ...itens];
+    renderizarLista(todos);
+    renderizarComparacao(todos);
+}
+
+/* ── comparação A x B (a partir do histórico) ───────────────────────────── */
+function renderizarComparacao(itens) {
+    const alvo = document.getElementById('conteudoComparacao');
+    alvo.innerHTML = '';
+
+    // Agrupa por grupo_comparacao (execução A+B juntas) ou, na falta, pelo nome do arquivo.
+    // A lista vem do mais novo para o mais antigo: o primeiro A e o primeiro B de cada grupo valem.
+    const grupos = new Map();
+    itens.forEach(it => {
+        const m = meta(it);
+        if (m.rotulo_config !== 'A' && m.rotulo_config !== 'B') return;
+        const chave = m.grupo_comparacao || ('arq:' + (it.nome_arquivo || it.titulo));
+        if (!grupos.has(chave)) grupos.set(chave, {});
+        const g = grupos.get(chave);
+        if (!g[m.rotulo_config]) g[m.rotulo_config] = it;
+    });
+
+    const linhas = [];
+    grupos.forEach(g => {
+        if (!g.A || !g.B) return;
+        const ma = meta(g.A), mb = meta(g.B);
+        const wa = werDe(g.A), wb = werDe(g.B);
+        const delta = (wa != null && wb != null) ? +(wb - wa).toFixed(2) : null;
+        linhas.push([
+            g.A.nome_arquivo || g.A.titulo,
+            wa != null ? wa : null,
+            wb != null ? wb : null,
+            delta != null ? (delta > 0 ? '+' : '') + delta : null,
+            ma.tempo_processamento_s, mb.tempo_processamento_s,
+            ma.fator_tempo_real, mb.fator_tempo_real,
+        ]);
+    });
+
+    if (!linhas.length) {
+        alvo.appendChild(el('p', 'text-xs text-gray-400',
+            'Ainda não há pares A × B. Na página Ground Truth, marque "Comparar A × B" ao enviar um arquivo (e cole a referência para ter o WER).'));
+        return;
+    }
+    alvo.appendChild(tabela(
+        ['Arquivo', 'WER A (%)', 'WER B (%)', 'Δ B−A (p.p.)', 'Tempo A (s)', 'Tempo B (s)', 'RTF A', 'RTF B'],
+        linhas
+    ));
+    alvo.appendChild(el('p', 'text-[11px] text-gray-500',
+        'A = loudness + sem pós-processamento (ASR puro). B = loudness + regras + revisão por LLM. Δ negativo = B melhorou o WER.'));
+}
+
+/* ── tabelas 3, 4 e 5 (Flask lê os CSV gerados pelos scripts) ───────────── */
+const TITULOS_AVALIACAO = {
+    tabela3: 'Tabela 3 — WER/CER por trecho (config A, ASR sem pós-processamento)',
+    tabela4: 'Tabela 4 — Comparação pareada A × B',
+    tabela5: 'Tabela 5 — Atribuição de falantes (DER)',
+};
+const DICAS_AVALIACAO = {
+    tabela3: 'Gere com: python avaliar_corpus.py',
+    tabela4: 'Gere com: python avaliar_corpus.py',
+    tabela5: 'Gere com: python avaliar_diarizacao.py (depois do avaliar_corpus.py)',
+};
+
+async function carregarAvaliacao() {
+    const alvo = document.getElementById('conteudoAvaliacao');
+    alvo.innerHTML = '';
+    let dados;
+    try {
+        const r = await fetch(`${API_TRANSCRICAO}/avaliacao/tabelas`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        dados = await r.json();
+    } catch (e) {
+        alvo.appendChild(el('p', 'text-xs text-red-300',
+            'Não consegui falar com o servidor de transcrição (Flask, porta 5000) para ler as tabelas.'));
+        return;
+    }
+
+    Object.keys(TITULOS_AVALIACAO).forEach(chave => {
+        const bloco = el('div', 'space-y-2');
+        bloco.appendChild(el('h3', 'text-sm font-bold text-white', TITULOS_AVALIACAO[chave]));
+        const t = dados[chave];
+        if (!t) {
+            bloco.appendChild(el('p', 'text-xs text-gray-400', 'Tabela ainda não gerada. ' + DICAS_AVALIACAO[chave]));
+        } else {
+            bloco.appendChild(tabela(t.cabecalho, t.linhas));
+            bloco.appendChild(el('p', 'text-[11px] text-gray-500',
+                'Atualizado em ' + new Date(t.atualizado_em).toLocaleString('pt-BR')));
+        }
+        alvo.appendChild(bloco);
+    });
 }
 
 /* ── renderização ───────────────────────────────────────────────────────── */
@@ -220,6 +358,61 @@ function renderizarLista(itens) {
     itens.forEach((item, idx) => lista.appendChild(criarCartao(item, itens.length - idx)));
 }
 
+/* bloco: configuração usada + desempenho + WER do servidor + alertas de qualidade */
+function blocoDesempenho(item) {
+    const m = meta(item);
+    const cfg = m.configuracao || {};
+    const bloco = el('div', 'space-y-3 pt-2 border-t border-white/5');
+    bloco.appendChild(el('h3', 'text-sm font-bold text-white', 'Configuração e desempenho'));
+
+    const loud = cfg.normalizar_loudness == null ? null : (cfg.normalizar_loudness ? 'ligada' : 'desligada');
+    const chips = [
+        ['Config', m.rotulo_config || (cfg.pos_processamento ? 'personalizada' : null)],
+        ['Perfil', m.perfil],
+        ['Loudness', loud],
+        ['Pós-proc.', cfg.pos_processamento],
+        ['ASR', cfg.modelo_transcricao],
+        ['Diarização', cfg.modelo_diarizacao],
+        ['LLM', cfg.modelo_llm],
+        ['Áudio', m.duracao_audio_s != null ? formatarTempo(m.duracao_audio_s) : null],
+        ['Tempo', m.tempo_processamento_s != null ? m.tempo_processamento_s + ' s' : null],
+        ['RTF', m.fator_tempo_real],
+    ].filter(([, v]) => v !== null && v !== undefined && v !== '');
+
+    if (!chips.length) {
+        bloco.appendChild(el('p', 'text-xs text-gray-400', 'Sem dados de configuração (transcrição anterior a este recurso ou feita pelo microfone).'));
+        return bloco;
+    }
+
+    const linha = el('div', 'flex flex-wrap gap-2');
+    chips.forEach(([k, v]) => {
+        const c = el('div', 'bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs');
+        c.appendChild(el('span', 'text-gray-400', k + ': '));
+        c.appendChild(el('span', 'font-bold text-white', String(v)));
+        linha.appendChild(c);
+    });
+    bloco.appendChild(linha);
+
+    // WER/CER calculados pelo servidor (bruto x corrigido)
+    if (m.wer && (m.wer.texto_bruto || m.wer.texto_corrigido)) {
+        const linhas = [['texto_bruto', 'ASR puro'], ['texto_corrigido', 'Após pós-processamento']]
+            .filter(([k]) => m.wer[k])
+            .map(([k, nome]) => {
+                const w = m.wer[k];
+                return [nome, w.wer_percentual + '%', w.cer_percentual + '%',
+                        w.substituicoes, w.delecoes, w.insercoes, w.palavras_referencia];
+            });
+        bloco.appendChild(tabela(['Versão do texto', 'WER', 'CER', 'S', 'D', 'I', 'N'], linhas));
+    }
+
+    // Alertas de qualidade do áudio
+    const alertas = (m.qualidade || []).flatMap(q => (q.alertas || []).map(a => (q.canal ? q.canal + ': ' : '') + a));
+    if (alertas.length) {
+        bloco.appendChild(el('p', 'text-[11px] text-amber-300', '⚠ ' + alertas.join(' · ')));
+    }
+    return bloco;
+}
+
 function criarCartao(item, numero) {
     const card = el('article', 'bg-[#121827]/80 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 relative overflow-hidden');
     card.appendChild(el('div', 'absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-emerald-400 to-indigo-500'));
@@ -229,9 +422,9 @@ function criarCartao(item, numero) {
     const titulos = el('div', 'space-y-1 min-w-0');
     titulos.appendChild(el('h2', 'text-lg font-extrabold text-white break-words', `#${numero} · ${item.titulo || 'Sem título'}`));
     const dataTxt = item.criado_em ? new Date(item.criado_em).toLocaleString('pt-BR') : '';
-    const meta = [dataTxt, item.origem === 'microfone' ? '🎤 microfone' : '📁 arquivo'];
-    if (item.metadados && item.metadados.duracao_audio_s != null) meta.push(`${formatarTempo(item.metadados.duracao_audio_s)} de áudio`);
-    titulos.appendChild(el('p', 'text-xs text-gray-400', meta.filter(Boolean).join(' · ')));
+    const meta0 = [dataTxt, item.origem === 'microfone' ? '🎤 microfone' : '📁 arquivo'];
+    if (meta(item).duracao_audio_s != null) meta0.push(`${formatarTempo(meta(item).duracao_audio_s)} de áudio`);
+    titulos.appendChild(el('p', 'text-xs text-gray-400', meta0.filter(Boolean).join(' · ')));
     topo.appendChild(titulos);
     if (item.local) topo.appendChild(el('span', 'bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-semibold px-2.5 py-1 rounded-full', 'não sincronizado'));
     card.appendChild(topo);
@@ -242,7 +435,10 @@ function criarCartao(item, numero) {
     detalhes.appendChild(el('div', 'texto-transcricao text-gray-300 text-sm leading-relaxed px-4 pb-4 max-h-[50vh] overflow-y-auto', item.texto || item.hipotese || ''));
     card.appendChild(detalhes);
 
-    /* métricas WER / CER */
+    /* configuração + desempenho */
+    card.appendChild(blocoDesempenho(item));
+
+    /* métricas WER / CER (calculadas pelo servidor ou manualmente aqui) */
     const blocoMetricas = el('div', 'space-y-3');
     card.appendChild(blocoMetricas);
 
@@ -265,7 +461,14 @@ function criarCartao(item, numero) {
             grade.appendChild(c);
         });
     }
-    desenharMetricas(item.metricas);
+
+    // Se o servidor já calculou o WER, usa; senão mostra o que foi calculado manualmente
+    let metricasIniciais = item.metricas;
+    if (!(metricasIniciais && metricasIniciais.wer != null)) {
+        const w = meta(item).wer && meta(item).wer.texto_corrigido;
+        if (w) metricasIniciais = { wer: w.wer_percentual, cer: w.cer_percentual, s: w.substituicoes, d: w.delecoes, i: w.insercoes, n: w.palavras_referencia };
+    }
+    desenharMetricas(metricasIniciais);
 
     const refArea = el('textarea', 'w-full px-4 py-3 bg-[#0b0f19]/60 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 text-sm resize-y');
     refArea.rows = 4;
@@ -337,7 +540,11 @@ function criarCartao(item, numero) {
     return card;
 }
 
-document.addEventListener('DOMContentLoaded', carregar);
+document.addEventListener('DOMContentLoaded', () => {
+    carregar();
+    carregarAvaliacao();
+    document.getElementById('btnAtualizarAvaliacao').addEventListener('click', carregarAvaliacao);
+});
 </script>
 </body>
 </html>
